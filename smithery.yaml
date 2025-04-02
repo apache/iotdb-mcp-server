@@ -1,0 +1,54 @@
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - host
+      - port
+      - user
+      - password
+      - database
+    properties:
+      host:
+        type: string
+        default: 127.0.0.1
+        description: IoTDB host
+      port:
+        type: number
+        default: 6667
+        description: IoTDB port
+      user:
+        type: string
+        default: root
+        description: IoTDB username
+      password:
+        type: string
+        default: root
+        description: IoTDB password
+      database:
+        type: string
+        default: test
+        description: IoTDB database
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({
+      command: 'python',
+      args: ['-m', 'iotdb_mcp_server.server'],
+      env: {
+        IOTDB_HOST: config.host,
+        IOTDB_PORT: String(config.port),
+        IOTDB_USER: config.user,
+        IOTDB_PASSWORD: config.password,
+        IOTDB_DATABASE: config.database
+      }
+    })
+  exampleConfig:
+    host: 127.0.0.1
+    port: 6667
+    user: root
+    password: root
+    database: test
