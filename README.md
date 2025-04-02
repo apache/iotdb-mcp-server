@@ -78,7 +78,7 @@ Location: `%APPDATA%/Claude/claude_desktop_config.json`
       "command": "uv",
       "args": [
         "--directory",
-        "parent_of_servers_repo/src/iotdb_mcp_server",
+        "YOUR_REPO_PATH/src/iotdb_mcp_server",
         "run",
         "server.py"
       ],
