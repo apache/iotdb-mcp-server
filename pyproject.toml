@@ -1,0 +1,31 @@
+[project]
+name = "iotdb-mcp-server"
+packages = [{ include = "src/iotdb_mcp_server" }]
+version = "0.1.0"
+description = "A Model Context Protocol (MCP) server that enables secure interaction with GreptimeDB databases. This server allows AI assistants to list tables, read data, and execute SQL queries through a controlled interface, making database exploration and analysis safer and more structured."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "apache-iotdb>=2.0.1b0"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    "venv",
+    ".git",
+    ".gitignore"
+]
+
+[tool.uv]
+dev-dependencies = [
+  "pyright",
+  "black",
+  "flake8",
+]
+
+[project.scripts]
+iotdb-mcp-server = "iotdb_mcp_server:main"
