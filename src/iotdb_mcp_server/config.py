@@ -47,6 +47,16 @@ class Config:
     IoTDB password
     """
 
+    database: str
+    """
+    IoTDB database
+    """
+
+    sql_dialect: str
+    """
+    SQL dialect: tree or table
+    """
+
     @staticmethod
     def from_env_arguments() -> "Config":
         """
@@ -82,10 +92,26 @@ class Config:
             default=os.getenv("IOTDB_PASSWORD", "root"),
         )
 
+        parser.add_argument(
+            "--database",
+            type=str,
+            help="IoTDB connect database name",
+            default=os.getenv("IOTDB_DATABASE", "test"),
+        )
+
+        parser.add_argument(
+            "--sql-dialect",
+            type=str,
+            help="SQL dialect: tree or table",
+            default=os.getenv("IOTDB_SQL_DIALECT", "table"),
+        )
+
         args = parser.parse_args()
         return Config(
             host=args.host,
             port=args.port,
             user=args.user,
             password=args.password,
+            database=args.database,
+            sql_dialect=args.sql_dialect,
         )

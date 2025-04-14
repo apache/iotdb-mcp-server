@@ -1,4 +1,4 @@
-# IoTDB MCP Server for Tree Model
+# IoTDB MCP Server
 
 [![smithery badge](https://smithery.ai/badge/@apache/iotdb-mcp-server)](https://smithery.ai/server/@apache/iotdb-mcp-server)
 
@@ -14,9 +14,9 @@ The server doesn't expose any resources.
 The server doesn't provide any prompts.
 
 ### Tools
-The server offers three core tools:
+The server offers different tools for IoTDB Tree Model and Table Model. You can choose between them by setting the "IOTDB_SQL_DIALECT" configuration to either "tree" or "table".
 
-#### Query Tools
+#### Tree Model
 - `metadata_query`
    - Execute SHOW/COUNT queries to read metadata from the database
    - Input:
@@ -28,6 +28,26 @@ The server offers three core tools:
      - `query_sql` (string): The SELECT SQL query to execute
    - Returns: Query results as array of objects
 
+#### Table Model
+
+##### Query Tools
+- `read_query`
+   - Execute SELECT queries to read data from the database
+   - Input:
+     - `query` (string): The SELECT SQL query to execute
+   - Returns: Query results as array of objects
+
+##### Schema Tools
+- `list_tables`
+   - Get a list of all tables in the database
+   - No input required
+   - Returns: Array of table names
+
+- `describe-table`
+   - View schema information for a specific table
+   - Input:
+     - `table_name` (string): Name of table to describe
+   - Returns: Array of column definitions with names and types
 
 
 ## Claude Desktop Integration
@@ -82,7 +102,8 @@ Location: `%APPDATA%/Claude/claude_desktop_config.json`
         "IOTDB_PORT": "6667",
         "IOTDB_USER": "root",
         "IOTDB_PASSWORD": "root",
-        "IOTDB_DATABASE": "test"
+        "IOTDB_DATABASE": "test",
+        "IOTDB_SQL_DIALECT": "table"
       }
     }
   }
