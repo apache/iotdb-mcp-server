@@ -20,7 +20,7 @@ The server offers different tools for IoTDB Tree Model and Table Model. You can 
 - `metadata_query`
    - Execute SHOW/COUNT queries to read metadata from the database
    - Input:
-    - `query_sql` (string): The SHOW/COUNT SQL query to execute 
+     - `query_sql` (string): The SHOW/COUNT SQL query to execute 
    - Returns: Query results as array of objects
 - `select_query`
    - Execute SELECT queries to read data from the database
