@@ -18,6 +18,7 @@
 
 import logging
 import sys
+import datetime
 
 from iotdb.Session import Session
 from iotdb.SessionPool import SessionPool, PoolConfig
@@ -178,8 +179,16 @@ def prepare_res(
     columns = _res.get_column_names()
     result = []
     while _res.has_next():
-        row = _res.next().get_fields()
-        result.append(",".join(map(str, row)))
+        record = _res.next()
+        if columns[0] == "Time":
+            timestamp = record.get_timestamp()
+            # 将时间戳格式化为易读的时间格式
+            formatted_time = datetime.datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            row = record.get_fields()
+            result.append(formatted_time + "," + ",".join(map(str, row)))
+        else:
+            row = record.get_fields()
+            result.append(",".join(map(str, row)))
     _session.close()
     return [
         TextContent(

@@ -1,4 +1,4 @@
-# IoTDB MCP Server
+# IoTDB MCP Server for Tree Model
 
 [![smithery badge](https://smithery.ai/badge/@apache/iotdb-mcp-server)](https://smithery.ai/server/@apache/iotdb-mcp-server)
 
@@ -17,24 +17,16 @@ The server doesn't provide any prompts.
 The server offers three core tools:
 
 #### Query Tools
-- `read_query`
+- `metadata_query`
+   - Execute SHOW/COUNT queries to read metadata from the database
+   - Input:
+    - `query_sql` (string): The SHOW/COUNT SQL query to execute 
+   - Returns: Query results as array of objects
+- `select_query`
    - Execute SELECT queries to read data from the database
    - Input:
-     - `query` (string): The SELECT SQL query to execute
+     - `query_sql` (string): The SELECT SQL query to execute
    - Returns: Query results as array of objects
-
-
-#### Schema Tools
-- `list_tables`
-   - Get a list of all tables in the database
-   - No input required
-   - Returns: Array of table names
-
-- `describe-table`
-   - View schema information for a specific table
-   - Input:
-     - `table_name` (string): Name of table to describe
-   - Returns: Array of column definitions with names and types
 
 
 
