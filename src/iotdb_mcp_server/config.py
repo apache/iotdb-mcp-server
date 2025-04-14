@@ -47,11 +47,6 @@ class Config:
     IoTDB password
     """
 
-    database: str
-    """
-    IoTDB database name
-    """
-
     @staticmethod
     def from_env_arguments() -> "Config":
         """
@@ -74,13 +69,6 @@ class Config:
         )
 
         parser.add_argument(
-            "--database",
-            type=str,
-            help="IoTDB connect database name",
-            default=os.getenv("IOTDB_DATABASE", "test"),
-        )
-
-        parser.add_argument(
             "--user",
             type=str,
             help="IoTDB username",
@@ -98,7 +86,6 @@ class Config:
         return Config(
             host=args.host,
             port=args.port,
-            database=args.database,
             user=args.user,
             password=args.password,
         )

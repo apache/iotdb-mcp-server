@@ -18,6 +18,8 @@ uv.lock
 # IDE settings (optional)
 .vscode/
 .idea/
+.specstory/
+.cursor/
 
 # Distribution directories
 *.dist-info/
