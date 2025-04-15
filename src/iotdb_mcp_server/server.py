@@ -185,7 +185,6 @@ if config.sql_dialect == "tree":
             record = _res.next()
             if columns[0] == "Time":
                 timestamp = record.get_timestamp()
-                # # 将时间戳格式化为易读的时间格式
                 # formatted_time = datetime.datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
                 row = record.get_fields()
                 result.append(timestamp + "," + ",".join(map(str, row)))
