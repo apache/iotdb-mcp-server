@@ -187,7 +187,7 @@ if config.sql_dialect == "tree":
                 timestamp = record.get_timestamp()
                 # formatted_time = datetime.datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
                 row = record.get_fields()
-                result.append(timestamp + "," + ",".join(map(str, row)))
+                result.append(str(timestamp) + "," + ",".join(map(str, row)))
             else:
                 row = record.get_fields()
                 result.append(",".join(map(str, row)))
