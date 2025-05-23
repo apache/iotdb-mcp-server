@@ -26,8 +26,7 @@ import asyncio
 
 def main():
     """Main entry point for the package."""
-    _config = Config.from_env_arguments()
-    asyncio.run(server.main(_config))
+    asyncio.run(server.main())
 
 
 # Expose important items at package level
