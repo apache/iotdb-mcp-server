@@ -18,6 +18,11 @@
 
 import logging
 import datetime
+import asyncio
+import os
+import uuid
+import pandas as pd
+from typing import Dict, Any, List, Union
 
 from iotdb.Session import Session
 from iotdb.SessionPool import SessionPool, PoolConfig
@@ -50,24 +55,36 @@ db_config = {
     "password": config.password,
     "database": config.database,
     "sql_dialect": config.sql_dialect,
+    "export_path": config.export_path,
 }
+
+max_pool_size = 100  # Increased from 100 for better concurrency
 
 logger.info(f"IoTDB Config: {db_config}")
 
+# Ensure export directory exists
+if not os.path.exists(config.export_path):
+    try:
+        os.makedirs(config.export_path)
+        logger.info(f"Created export directory: {config.export_path}")
+    except Exception as e:
+        logger.warning(f"Failed to create export directory {config.export_path}: {str(e)}")
+
 if config.sql_dialect == "tree":
 
+    # Configure connection pool with optimized settings
     pool_config = PoolConfig(
         node_urls=[str(config.host) + ":" + str(config.port)],
         user_name=config.user,
         password=config.password,
-        fetch_size=1024,
-        time_zone="UTC+8",
-        max_retry=3
+        fetch_size=1024,  # Fetch size for queries
+        time_zone="UTC+8", # Consistent timezone
+        max_retry=3  # Connection retry attempts
     )
-    max_pool_size = 5
-    wait_timeout_in_ms = 3000
+    # Optimize pool size based on expected concurrent queries
+    wait_timeout_in_ms = 5000  # Increased from 3000 for better reliability
     session_pool = SessionPool(pool_config, max_pool_size, wait_timeout_in_ms)
-
+    
     @mcp.tool()
     async def metadata_query(query_sql: str) -> list[TextContent]:
         """Execute metadata queries on IoTDB to explore database structure and statistics.
@@ -95,11 +112,12 @@ if config.sql_dialect == "tree":
             COUNT NODES root.ln
             COUNT DEVICES root.ln
         """
-        session = session_pool.get_session()
+        session = None
         try:
+            session = session_pool.get_session()
             stmt = query_sql.strip().upper()
             
-            # 处理SHOW DATABASES
+            # Process SHOW DATABASES
             if (
                 stmt.startswith("SHOW DATABASES")
                 or stmt.startswith("SHOW TIMESERIES")
@@ -113,11 +131,13 @@ if config.sql_dialect == "tree":
                 res = session.execute_query_statement(query_sql)
                 return prepare_res(res, session)
             else:
+                session.close()
                 raise ValueError("Unsupported metadata query. Please use one of the supported query types.")
-                
         except Exception as e:
-            session.close()
-            raise e
+            if session:
+                session.close()
+            logger.error(f"Failed to execute metadata query: {str(e)}")
+            raise
 
     @mcp.tool()
     async def select_query(query_sql: str) -> list[TextContent]:
@@ -163,18 +183,111 @@ if config.sql_dialect == "tree":
             MIN_TIME
             ...
         """
-        session = session_pool.get_session()
-        res = session.execute_query_statement(query_sql)
+        session = None
+        try:
+            session = session_pool.get_session()
+            stmt = query_sql.strip().upper()
+            
+            # Regular SELECT queries
+            if stmt.startswith("SELECT"):
+                res = session.execute_query_statement(query_sql)
+                return prepare_res(res, session)
+            else:
+                session.close()
+                raise ValueError("Only SELECT queries are allowed for select_query")
+        except Exception as e:
+            if session:
+                session.close()
+            logger.error(f"Failed to execute select query: {str(e)}")
+            raise
 
-        stmt = query_sql.strip().upper()
-        # Regular SELECT queries
-        if (
-            stmt.startswith("SELECT")
-        ):
-            return prepare_res(res, session)
-        # Non-SELECT queries
-        else:
-            raise ValueError("Only SELECT queries are allowed for read_query")
+    @mcp.tool()
+    async def export_query(query_sql: str, format: str = "csv") -> list[TextContent]:
+        """Execute a query and export the results to a CSV or Excel file.
+        
+        Args:
+            query_sql: The SQL query to execute (using TREE dialect)
+            format: Export format, either "csv" or "excel" (default: "csv")
+
+        SQL Syntax:
+            SELECT ⟨select_list⟩
+              FROM ⟨tables⟩
+              [WHERE ⟨condition⟩]
+              [GROUP BY ⟨groups⟩]
+              [HAVING ⟨group_filter⟩]
+              [FILL ⟨fill_methods⟩]
+              [ORDER BY ⟨order_expression⟩]
+              [OFFSET ⟨n⟩]
+              [LIMIT ⟨n⟩];
+            
+        Returns:
+            Information about the exported file and a preview of the data (max 10 rows)
+        """
+        session = None
+        try:
+            session = session_pool.get_session()
+            stmt = query_sql.strip().upper()
+            
+            if stmt.startswith("SELECT") or stmt.startswith("SHOW"):
+                # Execute the query
+                res = session.execute_query_statement(query_sql)
+                
+                # Get column names
+                columns = res.get_column_names()
+                
+                # Collect all rows
+                rows = []
+                while res.has_next():
+                    record = res.next()
+                    if columns[0] == "Time":
+                        timestamp = record.get_timestamp()
+                        row = record.get_fields()
+                        rows.append([timestamp] + row)
+                    else:
+                        rows.append(record.get_fields())
+                
+                # Close the session
+                session.close()
+                
+                # Create a pandas DataFrame
+                df = pd.DataFrame(rows, columns=columns)
+                
+                # Generate unique filename with timestamp
+                timestamp = int(datetime.datetime.now().timestamp())
+                filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
+                filepath = ""
+                
+                if format.lower() == "csv":
+                    filepath = f"{config.export_path}/{filename}.csv"
+                    df.to_csv(filepath, index=False)
+                elif format.lower() == "excel":
+                    filepath = f"{config.export_path}/{filename}.xlsx"
+                    df.to_excel(filepath, index=False)
+                else:
+                    raise ValueError("Format must be either 'csv' or 'excel'")
+                
+                # Generate preview (first 10 rows)
+                preview_rows = min(10, len(rows))
+                preview_data = []
+                preview_data.append(",".join(columns))  # Header
+                
+                for i in range(preview_rows):
+                    preview_data.append(",".join(map(str, rows[i])))
+                
+                # Return information
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n" + "\n".join(preview_data)
+                    )
+                ]
+            else:
+                raise ValueError("Only SELECT or SHOW queries are allowed for export")
+        except Exception as e:
+            if session:
+                session.close()
+            logger.error(f"Failed to export query: {str(e)}")
+            raise
 
     def prepare_res(
         _res: SessionDataSet, _session: Session
@@ -205,10 +318,11 @@ elif config.sql_dialect == "table":
         node_urls=[str(config.host) + ":" + str(config.port)],
         username=config.user,
         password=config.password,
+        max_pool_size=max_pool_size,  # Increased from 5 for better concurrency
         database=None if len(config.database) == 0 else config.database,
     )
     session_pool = TableSessionPool(session_pool_config)
-
+    
     @mcp.tool()
     async def read_query(query_sql: str) -> list[TextContent]:
         """Execute a SELECT query on the IoTDB. Please use table sql_dialect when generating SQL queries.
@@ -216,46 +330,146 @@ elif config.sql_dialect == "table":
         Args:
             query_sql: The SQL query to execute (using TABLE dialect)
         """
-        table_session = session_pool.get_session()
-        res = table_session.execute_query_statement(query_sql)
-
-        stmt = query_sql.strip().upper()
-        # Regular SELECT queries
-        if (
-            stmt.startswith("SELECT")
-            or stmt.startswith("DESCRIBE")
-            or stmt.startswith("SHOW")
-        ):
-            return prepare_res(res, table_session)
-        # Non-SELECT queries
-        else:
-            raise ValueError("Only SELECT queries are allowed for read_query")
-
-
+        table_session = None
+        try:
+            table_session = session_pool.get_session()
+            stmt = query_sql.strip().upper()
+            
+            # Regular SELECT queries
+            if (
+                stmt.startswith("SELECT")
+                or stmt.startswith("DESCRIBE")
+                or stmt.startswith("SHOW")
+            ):
+                res = table_session.execute_query_statement(query_sql)
+                return prepare_res(res, table_session)
+            else:
+                table_session.close()
+                raise ValueError("Only SELECT queries are allowed for read_query")
+        except Exception as e:
+            if table_session:
+                table_session.close()
+            logger.error(f"Failed to execute query: {str(e)}")
+            raise
+            
     @mcp.tool()
     async def list_tables() -> list[TextContent]:
         """List all tables in the IoTDB database."""
-        table_session = session_pool.get_session()
-        res = table_session.execute_query_statement("SHOW TABLES")
+        table_session = None
+        try:
+            table_session = session_pool.get_session()
+            res = table_session.execute_query_statement("SHOW TABLES")
 
-        result = ["Tables_in_" + db_config["database"]]  # Header
-        while res.has_next():
-            result.append(str(res.next().get_fields()[0]))
-        table_session.close()
-        return [TextContent(type="text", text="\n".join(result))]
-
-
+            result = ["Tables_in_" + db_config["database"]]  # Header
+            while res.has_next():
+                result.append(str(res.next().get_fields()[0]))
+            table_session.close()
+            return [TextContent(type="text", text="\n".join(result))]
+        except Exception as e:
+            if table_session:
+                table_session.close()
+            logger.error(f"Failed to list tables: {str(e)}")
+            raise
+            
     @mcp.tool()
     async def describe_table(table_name: str) -> list[TextContent]:
         """Get the schema information for a specific table
         Args:
             table_name: name of the table to describe
         """
-        table_session = session_pool.get_session()
-        res = table_session.execute_query_statement("DESC " + table_name)
+        table_session = None
+        try:
+            table_session = session_pool.get_session()
+            res = table_session.execute_query_statement("DESC " + table_name + " details")
+            return prepare_res(res, table_session)
+        except Exception as e:
+            if table_session:
+                table_session.close()
+            logger.error(f"Failed to describe table {table_name}: {str(e)}")
+            raise
+            
+    @mcp.tool()
+    async def export_table_query(query_sql: str, format: str = "csv") -> list[TextContent]:
+        """Execute a query and export the results to a CSV or Excel file.
+        
+        Args:
+            query_sql: The SQL query to execute (using TABLE dialect)
+            format: Export format, either "csv" or "excel" (default: "csv")
+                    
+        SQL Syntax:
+            SELECT ⟨select_list⟩
+              FROM ⟨tables⟩
+              [WHERE ⟨condition⟩]
+              [GROUP BY ⟨groups⟩]
+              [HAVING ⟨group_filter⟩]
+              [FILL ⟨fill_methods⟩]
+              [ORDER BY ⟨order_expression⟩]
+              [OFFSET ⟨n⟩]
+              [LIMIT ⟨n⟩];
 
-        return prepare_res(res, table_session)
-
+        Returns:
+            Information about the exported file and a preview of the data (max 10 rows)
+        """
+        table_session = None
+        try:
+            table_session = session_pool.get_session()
+            stmt = query_sql.strip().upper()
+            
+            if stmt.startswith("SELECT") or stmt.startswith("SHOW") or stmt.startswith("DESCRIBE") or stmt.startswith("DESC"):
+                # Execute the query
+                res = table_session.execute_query_statement(query_sql)
+                
+                # Get column names
+                columns = res.get_column_names()
+                
+                # Collect all rows
+                rows = []
+                while res.has_next():
+                    row = res.next().get_fields()
+                    rows.append(row)
+                
+                # Close the session
+                table_session.close()
+                
+                # Create a pandas DataFrame
+                df = pd.DataFrame(rows, columns=columns)
+                
+                # Generate unique filename with timestamp
+                timestamp = int(datetime.datetime.now().timestamp())
+                filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
+                filepath = ""
+                
+                if format.lower() == "csv":
+                    filepath = f"{config.export_path}/{filename}.csv"
+                    df.to_csv(filepath, index=False)
+                elif format.lower() == "excel":
+                    filepath = f"{config.export_path}/{filename}.xlsx"
+                    df.to_excel(filepath, index=False)
+                else:
+                    raise ValueError("Format must be either 'csv' or 'excel'")
+                
+                # Generate preview (first 10 rows)
+                preview_rows = min(10, len(rows))
+                preview_data = []
+                preview_data.append(",".join(columns))  # Header
+                
+                for i in range(preview_rows):
+                    preview_data.append(",".join(map(str, rows[i])))
+                
+                # Return information
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n" + "\n".join(preview_data)
+                    )
+                ]
+            else:
+                raise ValueError("Only SELECT, SHOW or DESCRIBE queries are allowed for export")
+        except Exception as e:
+            if table_session:
+                table_session.close()
+            logger.error(f"Failed to export table query: {str(e)}")
+            raise
 
     def prepare_res(
         _res: SessionDataSet, _table_session: TableSession
