@@ -9,7 +9,8 @@ license-file="LICENSE"
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.0.0",
-    "apache-iotdb>=2.0.1b0"
+    "apache-iotdb>=2.0.3",
+    "openpyxl>=3.1.5"
 ]
 
 [build-system]

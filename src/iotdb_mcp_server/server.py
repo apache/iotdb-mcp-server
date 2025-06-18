@@ -144,7 +144,7 @@ if config.sql_dialect == "tree":
         """Execute a SELECT query on the IoTDB tree SQL dialect.
 
         Args:
-            query_sql: The SQL query to execute (using TREE dialect)
+            query_sql: The SQL query to execute (using TREE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000).
 
         SQL Syntax:
             SELECT [LAST] selectExpr [, selectExpr] ...
@@ -202,12 +202,13 @@ if config.sql_dialect == "tree":
             raise
 
     @mcp.tool()
-    async def export_query(query_sql: str, format: str = "csv") -> list[TextContent]:
+    async def export_query(query_sql: str, format: str = "csv", filename: str = None) -> list[TextContent]:
         """Execute a query and export the results to a CSV or Excel file.
         
         Args:
-            query_sql: The SQL query to execute (using TREE dialect)
+            query_sql: The SQL query to execute (using TREE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000)
             format: Export format, either "csv" or "excel" (default: "csv")
+            filename: Optional filename for the exported file. If not provided, a unique filename will be generated.
 
         SQL Syntax:
             SELECT ⟨select_list⟩
@@ -232,48 +233,39 @@ if config.sql_dialect == "tree":
                 # Execute the query
                 res = session.execute_query_statement(query_sql)
                 
-                # Get column names
-                columns = res.get_column_names()
-                
-                # Collect all rows
-                rows = []
-                while res.has_next():
-                    record = res.next()
-                    if columns[0] == "Time":
-                        timestamp = record.get_timestamp()
-                        row = record.get_fields()
-                        rows.append([timestamp] + row)
-                    else:
-                        rows.append(record.get_fields())
-                
+                # Create a pandas DataFrame
+                df = res.todf()
                 # Close the session
                 session.close()
                 
-                # Create a pandas DataFrame
-                df = pd.DataFrame(rows, columns=columns)
-                
                 # Generate unique filename with timestamp
                 timestamp = int(datetime.datetime.now().timestamp())
-                filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
+                if filename is None:
+                    # Generate a unique filename if not provided
+                    filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
                 filepath = ""
                 
                 if format.lower() == "csv":
+                    if(filename.lower().endswith(".csv")):
+                        filename = filename[:-4]
                     filepath = f"{config.export_path}/{filename}.csv"
                     df.to_csv(filepath, index=False)
                 elif format.lower() == "excel":
+                    if(filename.lower().endswith(".xlsx")):
+                        filename = filename[:-5]
                     filepath = f"{config.export_path}/{filename}.xlsx"
                     df.to_excel(filepath, index=False)
                 else:
                     raise ValueError("Format must be either 'csv' or 'excel'")
                 
                 # Generate preview (first 10 rows)
-                preview_rows = min(10, len(rows))
+                preview_rows = min(10, len(df))
                 preview_data = []
-                preview_data.append(",".join(columns))  # Header
-                
+                preview_data.append(",".join(df.columns))  # Header
+
                 for i in range(preview_rows):
-                    preview_data.append(",".join(map(str, rows[i])))
-                
+                    preview_data.append(",".join(map(str, df.iloc[i])))
+
                 # Return information
                 return [
                     TextContent(
@@ -328,7 +320,7 @@ elif config.sql_dialect == "table":
         """Execute a SELECT query on the IoTDB. Please use table sql_dialect when generating SQL queries.
 
         Args:
-            query_sql: The SQL query to execute (using TABLE dialect)
+            query_sql: The SQL query to execute (using TABLE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000)
         """
         table_session = None
         try:
@@ -389,12 +381,13 @@ elif config.sql_dialect == "table":
             raise
             
     @mcp.tool()
-    async def export_table_query(query_sql: str, format: str = "csv") -> list[TextContent]:
+    async def export_table_query(query_sql: str, format: str = "csv", filename: str = None) -> list[TextContent]:
         """Execute a query and export the results to a CSV or Excel file.
         
         Args:
-            query_sql: The SQL query to execute (using TABLE dialect)
+            query_sql: The SQL query to execute (using TABLE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000)
             format: Export format, either "csv" or "excel" (default: "csv")
+            filename: Optional filename for the exported file. If not provided, a unique filename will be generated.
                     
         SQL Syntax:
             SELECT ⟨select_list⟩
@@ -419,43 +412,39 @@ elif config.sql_dialect == "table":
                 # Execute the query
                 res = table_session.execute_query_statement(query_sql)
                 
-                # Get column names
-                columns = res.get_column_names()
-                
-                # Collect all rows
-                rows = []
-                while res.has_next():
-                    row = res.next().get_fields()
-                    rows.append(row)
+                # Create a pandas DataFrame
+                df = res.todf()
                 
                 # Close the session
                 table_session.close()
                 
-                # Create a pandas DataFrame
-                df = pd.DataFrame(rows, columns=columns)
-                
                 # Generate unique filename with timestamp
                 timestamp = int(datetime.datetime.now().timestamp())
-                filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
+                if filename is None:
+                    filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
                 filepath = ""
                 
                 if format.lower() == "csv":
+                    if(filename.lower().endswith(".csv")):
+                        filename = filename[:-4]
                     filepath = f"{config.export_path}/{filename}.csv"
                     df.to_csv(filepath, index=False)
                 elif format.lower() == "excel":
+                    if(filename.lower().endswith(".xlsx")):
+                        filename = filename[:-5]
                     filepath = f"{config.export_path}/{filename}.xlsx"
                     df.to_excel(filepath, index=False)
                 else:
                     raise ValueError("Format must be either 'csv' or 'excel'")
                 
                 # Generate preview (first 10 rows)
-                preview_rows = min(10, len(rows))
+                preview_rows = min(10, len(df))
                 preview_data = []
-                preview_data.append(",".join(columns))  # Header
-                
+                preview_data.append(",".join(df.columns))  # Header
+
                 for i in range(preview_rows):
-                    preview_data.append(",".join(map(str, rows[i])))
-                
+                    preview_data.append(",".join(map(str, df.iloc[i])))
+
                 # Return information
                 return [
                     TextContent(
