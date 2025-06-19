@@ -2,6 +2,10 @@
 
 [![smithery badge](https://smithery.ai/badge/@apache/iotdb-mcp-server)](https://smithery.ai/server/@apache/iotdb-mcp-server)
 
+<a href="https://glama.ai/mcp/servers/@apache/iotdb-mcp-server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@apache/iotdb-mcp-server/badge" alt="IoTDB Server MCP server" />
+</a>
+
 ## Overview
 A Model Context Protocol (MCP) server implementation that provides database interaction and business intelligence capabilities through IoTDB. This server enables running SQL queries.
 
