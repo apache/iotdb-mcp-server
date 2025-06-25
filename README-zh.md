@@ -59,15 +59,12 @@ IoTDB MCP Server 是一个基于模型上下文协议（Model Context Protocol, 
 
 #### 表模型 (Table Model)
 
-##### 查询工具
-
 - `read_query`
+
   - 执行 SELECT 查询以从数据库读取数据
   - 输入:
-    - `query_sql` (字符串): 要执行的 SELECT SQL 查询（使用表模型方言，时间使用 ISO 8601 格式，例如 2017-11-01T00:08:00.000）
+    - `query_sql` (字符串): 要执行的 SELECT SQL 查询（使用表模型方言，时间使用 ISO 8601 格式，例如 `2017-11-01T00:08:00.000`）
   - 返回: 查询结果作为对象数组
-
-##### 模式工具
 
 - `list_tables`
 
