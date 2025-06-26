@@ -56,6 +56,11 @@ class Config:
     """
     SQL dialect: tree or table
     """
+    
+    export_path: str
+    """
+    Path for exporting query results
+    """
 
     @staticmethod
     def from_env_arguments() -> "Config":
@@ -91,7 +96,7 @@ class Config:
             help="IoTDB password",
             default=os.getenv("IOTDB_PASSWORD", "root"),
         )
-
+        
         parser.add_argument(
             "--database",
             type=str,
@@ -105,6 +110,13 @@ class Config:
             help="SQL dialect: tree or table",
             default=os.getenv("IOTDB_SQL_DIALECT", "table"),
         )
+        
+        parser.add_argument(
+            "--export-path",
+            type=str,
+            help="Path for exporting query results",
+            default=os.getenv("IOTDB_EXPORT_PATH", "/tmp"),
+        )
 
         args = parser.parse_args()
         return Config(
@@ -114,4 +126,5 @@ class Config:
             password=args.password,
             database=args.database,
             sql_dialect=args.sql_dialect,
+            export_path=args.export_path,
         )

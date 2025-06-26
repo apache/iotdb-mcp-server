@@ -1,15 +1,16 @@
 [project]
 name = "iotdb-mcp-server"
 packages = [{ include = "src/iotdb_mcp_server" }]
-version = "0.1.0"
+version = "0.2.0"
 description = "A Model Context Protocol (MCP) server that enables secure interaction with IoTDB databases. This server allows AI assistants to list tables, read data, and execute SQL queries through a controlled interface, making database exploration and analysis safer and more structured."
 readme = "README.md"
 license = "Apache-2.0"
 license-file="LICENSE"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp>=1.0.0",
-    "apache-iotdb>=2.0.1b0"
+    "fastmcp>=2.8.1",
+    "apache-iotdb>=2.0.3",
+    "openpyxl>=3.1.5"
 ]
 
 [build-system]

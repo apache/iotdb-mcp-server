@@ -17,6 +17,10 @@
 # under the License.
 #
 
+notifications:
+  issues: reviews@iotdb.apache.org
+  pullrequests: reviews@iotdb.apache.org
+
 github:
   description: "Apache IoTDB MCP Server"
   homepage: https://iotdb.apache.org/
@@ -33,8 +37,8 @@ github:
     issues: true
   enabled_merge_buttons:
     # enable squash button:
-    squash:  true
+    squash: true
     # enable merge button:
-    merge:   false
+    merge: false
     # disable rebase button:
-    rebase:  true
+    rebase: true
