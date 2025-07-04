@@ -30,7 +30,7 @@ from iotdb.utils.SessionDataSet import SessionDataSet
 from iotdb.table_session import TableSession
 from iotdb.table_session_pool import TableSessionPool, TableSessionPoolConfig
 from fastmcp import FastMCP
-from fastmcp.utilities.types import TextContent
+from mcp.types import TextContent
 
 from iotdb_mcp_server.config import Config
 
