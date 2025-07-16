@@ -9,7 +9,7 @@ license-file="LICENSE"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp>=2.8.1",
-    "apache-iotdb>=2.0.3",
+    "apache-iotdb>=2.0.4",
     "openpyxl>=3.1.5"
 ]
 
