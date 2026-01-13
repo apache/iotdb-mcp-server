@@ -15,12 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 #
+# Security patch for CVE-2026-XXXXX (path traversal vulnerability leading to RCE)
+# Author: Mohammed Tanveer (threatpointer)
+# Date: 2026-01-12
+#
 
 import logging
 import datetime
 import asyncio
 import os
 import uuid
+import re
 import pandas as pd
 from typing import Dict, Any, List, Union
 
@@ -66,23 +71,97 @@ if not os.path.exists(config.export_path):
         os.makedirs(config.export_path)
         logger.info(f"Created export directory: {config.export_path}")
     except Exception as e:
-        logger.warning(f"Failed to create export directory {config.export_path}: {str(e)}")
+        logger.warning(
+            f"Failed to create export directory {config.export_path}: {str(e)}"
+        )
+
+
+def sanitize_filename(filename: str, base_dir: str) -> str:
+    """
+    Sanitize and validate filename to prevent path traversal attacks.
+
+    Security patch for CVE-2026-XXXXX
+    Author: Mohammed Tanveer (threatpointer)
+    Date: 2026-01-12
+
+    Args:
+        filename: The user-provided filename
+        base_dir: The base directory for exports (must be absolute path)
+
+    Returns:
+        The sanitized absolute filepath
+
+    Raises:
+        ValueError: If the filename contains invalid characters or attempts path traversal
+
+    Security measures:
+    - Rejects any path separators or traversal sequences before processing
+    - Validates allowed characters (alphanumeric, underscore, hyphen, dot)
+    - Resolves absolute path and verifies it stays within base_dir boundary
+    - Prevents directory traversal, symlink attacks, and path manipulation
+    """
+    if not filename:
+        raise ValueError("Filename cannot be empty")
+
+    # First, reject any path separators or traversal patterns before processing
+    # This catches attacks before os.path.basename can process them
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError(
+            "Invalid filename: path separators and directory traversal sequences are not allowed"
+        )
+
+    # Remove any directory components - only keep the base filename
+    # (This is now a safety check since we already blocked separators)
+    filename = os.path.basename(filename)
+
+    # Validate characters - only allow alphanumeric, underscore, hyphen, and dot
+    if not re.match(r"^[a-zA-Z0-9_\-\.]+$", filename):
+        raise ValueError(
+            "Invalid filename: only alphanumeric characters, underscore, hyphen, and dot are allowed"
+        )
+
+    # Prevent filenames that are just dots or empty after sanitization
+    if not filename or filename in (".", ".."):
+        raise ValueError("Invalid filename")
+
+    # Prevent filenames that start with a dot followed by a dot (like ..something)
+    if filename.startswith(".."):
+        raise ValueError("Invalid filename: cannot start with '..'")
+
+    # Construct the full path
+    filepath = os.path.join(base_dir, filename)
+
+    # Resolve to absolute path (resolves symlinks and normalizes path)
+    filepath_real = os.path.realpath(filepath)
+    basedir_real = os.path.realpath(base_dir)
+
+    # Ensure the resolved path is within the base directory boundary
+    # This prevents path traversal even with symlinks or complex path manipulation
+    if (
+        not filepath_real.startswith(basedir_real + os.sep)
+        and filepath_real != basedir_real
+    ):
+        raise ValueError(
+            f"Path traversal detected: file must be within export directory"
+        )
+
+    return filepath_real
+
 
 if config.sql_dialect == "tree":
-
     # Configure connection pool with optimized settings
     pool_config = PoolConfig(
         node_urls=[str(config.host) + ":" + str(config.port)],
         user_name=config.user,
         password=config.password,
         fetch_size=1024,  # Fetch size for queries
-        time_zone="UTC+8", # Consistent timezone
-        max_retry=3  # Connection retry attempts
+        time_zone="UTC+8",  # Consistent timezone
+        max_retry=3,  # Connection retry attempts
     )
     # Optimize pool size based on expected concurrent queries
     wait_timeout_in_ms = 5000  # Increased from 3000 for better reliability
     session_pool = SessionPool(pool_config, max_pool_size, wait_timeout_in_ms)
-    
+
     @mcp.tool()
     async def metadata_query(query_sql: str) -> list[TextContent]:
         """Execute metadata queries on IoTDB to explore database structure and statistics.
@@ -96,7 +175,7 @@ if config.sql_dialect == "tree":
                 - SHOW DEVICES [path]: List all devices or devices under a specific path
                 - COUNT TIMESERIES [path]: Count time series under a specific path
                 - COUNT NODES [path]: Count nodes under a specific path
-                - COUNT DEVICES [path]: Count devices under a specific path  
+                - COUNT DEVICES [path]: Count devices under a specific path
                 - if path is not provided, the query will be applied to root.**
 
         Examples:
@@ -114,7 +193,7 @@ if config.sql_dialect == "tree":
         try:
             session = session_pool.get_session()
             stmt = query_sql.strip().upper()
-            
+
             # Process SHOW DATABASES
             if (
                 stmt.startswith("SHOW DATABASES")
@@ -130,7 +209,9 @@ if config.sql_dialect == "tree":
                 return prepare_res(res, session)
             else:
                 session.close()
-                raise ValueError("Unsupported metadata query. Please use one of the supported query types.")
+                raise ValueError(
+                    "Unsupported metadata query. Please use one of the supported query types."
+                )
         except Exception as e:
             if session:
                 session.close()
@@ -185,7 +266,7 @@ if config.sql_dialect == "tree":
         try:
             session = session_pool.get_session()
             stmt = query_sql.strip().upper()
-            
+
             # Regular SELECT queries
             if stmt.startswith("SELECT"):
                 res = session.execute_query_statement(query_sql)
@@ -200,9 +281,11 @@ if config.sql_dialect == "tree":
             raise
 
     @mcp.tool()
-    async def export_query(query_sql: str, format: str = "csv", filename: str = None) -> list[TextContent]:
+    async def export_query(
+        query_sql: str, format: str = "csv", filename: str = None
+    ) -> list[TextContent]:
         """Execute a query and export the results to a CSV or Excel file.
-        
+
         Args:
             query_sql: The SQL query to execute (using TREE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000)
             format: Export format, either "csv" or "excel" (default: "csv")
@@ -218,7 +301,7 @@ if config.sql_dialect == "tree":
               [ORDER BY ⟨order_expression⟩]
               [OFFSET ⟨n⟩]
               [LIMIT ⟨n⟩];
-            
+
         Returns:
             Information about the exported file and a preview of the data (max 10 rows)
         """
@@ -226,36 +309,37 @@ if config.sql_dialect == "tree":
         try:
             session = session_pool.get_session()
             stmt = query_sql.strip().upper()
-            
+
             if stmt.startswith("SELECT") or stmt.startswith("SHOW"):
                 # Execute the query
                 res = session.execute_query_statement(query_sql)
-                
+
                 # Create a pandas DataFrame
                 df = res.todf()
                 # Close the session
                 session.close()
-                
+
                 # Generate unique filename with timestamp
                 timestamp = int(datetime.datetime.now().timestamp())
                 if filename is None:
                     # Generate a unique filename if not provided
                     filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
-                filepath = ""
-                
+
                 if format.lower() == "csv":
-                    if(filename.lower().endswith(".csv")):
+                    if filename.lower().endswith(".csv"):
                         filename = filename[:-4]
-                    filepath = f"{config.export_path}/{filename}.csv"
+                    # Sanitize filename to prevent path traversal attacks
+                    filepath = sanitize_filename(f"{filename}.csv", config.export_path)
                     df.to_csv(filepath, index=False)
                 elif format.lower() == "excel":
-                    if(filename.lower().endswith(".xlsx")):
+                    if filename.lower().endswith(".xlsx"):
                         filename = filename[:-5]
-                    filepath = f"{config.export_path}/{filename}.xlsx"
+                    # Sanitize filename to prevent path traversal attacks
+                    filepath = sanitize_filename(f"{filename}.xlsx", config.export_path)
                     df.to_excel(filepath, index=False)
                 else:
                     raise ValueError("Format must be either 'csv' or 'excel'")
-                
+
                 # Generate preview (first 10 rows)
                 preview_rows = min(10, len(df))
                 preview_data = []
@@ -268,7 +352,8 @@ if config.sql_dialect == "tree":
                 return [
                     TextContent(
                         type="text",
-                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n" + "\n".join(preview_data)
+                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n"
+                        + "\n".join(preview_data),
                     )
                 ]
             else:
@@ -279,9 +364,7 @@ if config.sql_dialect == "tree":
             logger.error(f"Failed to export query: {str(e)}")
             raise
 
-    def prepare_res(
-        _res: SessionDataSet, _session: Session
-    ) -> list[TextContent]:
+    def prepare_res(_res: SessionDataSet, _session: Session) -> list[TextContent]:
         columns = _res.get_column_names()
         result = []
         while _res.has_next():
@@ -303,7 +386,6 @@ if config.sql_dialect == "tree":
         ]
 
 elif config.sql_dialect == "table":
-
     session_pool_config = TableSessionPoolConfig(
         node_urls=[str(config.host) + ":" + str(config.port)],
         username=config.user,
@@ -312,7 +394,7 @@ elif config.sql_dialect == "table":
         database=None if len(config.database) == 0 else config.database,
     )
     session_pool = TableSessionPool(session_pool_config)
-    
+
     @mcp.tool()
     async def read_query(query_sql: str) -> list[TextContent]:
         """Execute a SELECT query on the IoTDB. Please use table sql_dialect when generating SQL queries.
@@ -324,7 +406,7 @@ elif config.sql_dialect == "table":
         try:
             table_session = session_pool.get_session()
             stmt = query_sql.strip().upper()
-            
+
             # Regular SELECT queries
             if (
                 stmt.startswith("SELECT")
@@ -341,7 +423,7 @@ elif config.sql_dialect == "table":
                 table_session.close()
             logger.error(f"Failed to execute query: {str(e)}")
             raise
-            
+
     @mcp.tool()
     async def list_tables() -> list[TextContent]:
         """List all tables in the IoTDB database."""
@@ -360,7 +442,7 @@ elif config.sql_dialect == "table":
                 table_session.close()
             logger.error(f"Failed to list tables: {str(e)}")
             raise
-            
+
     @mcp.tool()
     async def describe_table(table_name: str) -> list[TextContent]:
         """Get the schema information for a specific table
@@ -370,23 +452,27 @@ elif config.sql_dialect == "table":
         table_session = None
         try:
             table_session = session_pool.get_session()
-            res = table_session.execute_query_statement("DESC " + table_name + " details")
+            res = table_session.execute_query_statement(
+                "DESC " + table_name + " details"
+            )
             return prepare_res(res, table_session)
         except Exception as e:
             if table_session:
                 table_session.close()
             logger.error(f"Failed to describe table {table_name}: {str(e)}")
             raise
-            
+
     @mcp.tool()
-    async def export_table_query(query_sql: str, format: str = "csv", filename: str = None) -> list[TextContent]:
+    async def export_table_query(
+        query_sql: str, format: str = "csv", filename: str = None
+    ) -> list[TextContent]:
         """Execute a query and export the results to a CSV or Excel file.
-        
+
         Args:
             query_sql: The SQL query to execute (using TABLE dialect, time using ISO 8601 format, e.g. 2017-11-01T00:08:00.000)
             format: Export format, either "csv" or "excel" (default: "csv")
             filename: Optional filename for the exported file. If not provided, a unique filename will be generated.
-                    
+
         SQL Syntax:
             SELECT ⟨select_list⟩
               FROM ⟨tables⟩
@@ -405,36 +491,42 @@ elif config.sql_dialect == "table":
         try:
             table_session = session_pool.get_session()
             stmt = query_sql.strip().upper()
-            
-            if stmt.startswith("SELECT") or stmt.startswith("SHOW") or stmt.startswith("DESCRIBE") or stmt.startswith("DESC"):
+
+            if (
+                stmt.startswith("SELECT")
+                or stmt.startswith("SHOW")
+                or stmt.startswith("DESCRIBE")
+                or stmt.startswith("DESC")
+            ):
                 # Execute the query
                 res = table_session.execute_query_statement(query_sql)
-                
+
                 # Create a pandas DataFrame
                 df = res.todf()
-                
+
                 # Close the session
                 table_session.close()
-                
+
                 # Generate unique filename with timestamp
                 timestamp = int(datetime.datetime.now().timestamp())
                 if filename is None:
                     filename = f"dump_{uuid.uuid4().hex[:4]}_{timestamp}"
-                filepath = ""
-                
+
                 if format.lower() == "csv":
-                    if(filename.lower().endswith(".csv")):
+                    if filename.lower().endswith(".csv"):
                         filename = filename[:-4]
-                    filepath = f"{config.export_path}/{filename}.csv"
+                    # Sanitize filename to prevent path traversal attacks
+                    filepath = sanitize_filename(f"{filename}.csv", config.export_path)
                     df.to_csv(filepath, index=False)
                 elif format.lower() == "excel":
-                    if(filename.lower().endswith(".xlsx")):
+                    if filename.lower().endswith(".xlsx"):
                         filename = filename[:-5]
-                    filepath = f"{config.export_path}/{filename}.xlsx"
+                    # Sanitize filename to prevent path traversal attacks
+                    filepath = sanitize_filename(f"{filename}.xlsx", config.export_path)
                     df.to_excel(filepath, index=False)
                 else:
                     raise ValueError("Format must be either 'csv' or 'excel'")
-                
+
                 # Generate preview (first 10 rows)
                 preview_rows = min(10, len(df))
                 preview_data = []
@@ -447,11 +539,14 @@ elif config.sql_dialect == "table":
                 return [
                     TextContent(
                         type="text",
-                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n" + "\n".join(preview_data)
+                        text=f"Query results exported to {filepath}\n\nPreview (first {preview_rows} rows):\n"
+                        + "\n".join(preview_data),
                     )
                 ]
             else:
-                raise ValueError("Only SELECT, SHOW or DESCRIBE queries are allowed for export")
+                raise ValueError(
+                    "Only SELECT, SHOW or DESCRIBE queries are allowed for export"
+                )
         except Exception as e:
             if table_session:
                 table_session.close()
