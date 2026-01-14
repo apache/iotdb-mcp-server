@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/apache-iotdb-mcp-server-badge.png)](https://mseep.ai/app/apache-iotdb-mcp-server)
+
 # IoTDB MCP Server
 
 [![smithery badge](https://smithery.ai/badge/@apache/iotdb-mcp-server)](https://smithery.ai/server/@apache/iotdb-mcp-server)
