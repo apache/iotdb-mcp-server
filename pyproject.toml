@@ -6,7 +6,7 @@ description = "A Model Context Protocol (MCP) server that enables secure interac
 readme = "README.md"
 license = "Apache-2.0"
 license-file="LICENSE"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.8.1",
     "apache-iotdb>=2.0.4",
@@ -33,3 +33,4 @@ dev-dependencies = [
 
 [project.scripts]
 iotdb-mcp-server = "iotdb_mcp_server:main"
+iotdb-target-cli = "iotdb_mcp_server.target_cli:main"

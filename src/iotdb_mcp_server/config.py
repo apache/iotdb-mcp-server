@@ -17,8 +17,41 @@
 #
 
 import argparse
+from typing import Any
 from dataclasses import dataclass
+from dataclasses import field
 import os
+from pathlib import Path
+
+from iotdb_mcp_server.target_registry import IoTDBTarget
+from iotdb_mcp_server.target_registry import IoTDBTargetRegistry
+from iotdb_mcp_server.target_registry import target_from_mapping
+
+
+def env_or_default(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value
+
+
+def default_export_path() -> str:
+    explicit = os.getenv("IOTDB_EXPORT_PATH")
+    if explicit:
+        return explicit
+
+    workspace = os.getenv("TIMESEEK_WORKSPACE_ROOT") or os.getenv(
+        "TIMESEEK_EXPERIMENT_WORKSPACE_ROOT"
+    )
+    if workspace:
+        return str(
+            Path(workspace).expanduser()
+            / "auto_rule"
+            / ".tmp"
+            / "iotdb_exports"
+        )
+
+    return "/tmp"
 
 
 @dataclass
@@ -49,18 +82,125 @@ class Config:
 
     database: str
     """
-    IoTDB database
+    IoTDB database/session scope.
+    Table dialect: current database name.
+    Tree dialect: optional root scope hint; tree SQL still uses explicit root paths in queries.
     """
 
     sql_dialect: str
     """
     SQL dialect: tree or table
     """
+
+    timezone: str
+    """
+    IoTDB session timezone.
+    """
     
     export_path: str
     """
     Path for exporting query results
     """
+
+    target_id: str = "default"
+    display_name: str = "Default IoTDB"
+    target_kind: str = "local"
+    node_urls: tuple[str, ...] = ()
+    iotdb_home: str = ""
+    use_ssl: bool = False
+    ca_certs: str = ""
+    connection_timeout_in_ms: int | None = None
+    enable_redirection: bool = True
+    enable_compression: bool = False
+    fetch_size: int = 1024
+    max_retry: int = 3
+    max_pool_size: int = 100
+    tree_wait_timeout_in_ms: int = 5000
+    table_wait_timeout_in_ms: int = 10000
+    target_fingerprint: str = ""
+    policy: dict[str, str] = field(default_factory=dict)
+    last_known_good_credential: dict[str, object] = field(default_factory=dict)
+    verified_at: str = ""
+    target_registry: IoTDBTargetRegistry | None = field(default=None, repr=False, compare=False)
+    session_manager: Any | None = field(default=None, repr=False, compare=False)
+    targets_file: str = ""
+    targets_json: str = field(default="", repr=False, compare=False)
+    targets_file_mtime_ns: int | None = field(default=None, repr=False, compare=False)
+
+    @classmethod
+    def from_target(
+        cls,
+        target: IoTDBTarget,
+        target_registry: IoTDBTargetRegistry | None = None,
+        session_manager: Any | None = None,
+    ) -> "Config":
+        return cls(
+            host=target.host,
+            port=target.port,
+            user=target.user,
+            password=target.password,
+            database=target.database,
+            sql_dialect=target.sql_dialect,
+            timezone=target.timezone,
+            export_path=target.export_path,
+            target_id=target.target_id,
+            display_name=target.display_name,
+            target_kind=target.kind,
+            node_urls=target.node_urls,
+            iotdb_home=target.iotdb_home,
+            use_ssl=target.use_ssl,
+            ca_certs=target.ca_certs,
+            connection_timeout_in_ms=target.connection_timeout_in_ms,
+            enable_redirection=target.enable_redirection,
+            enable_compression=target.enable_compression,
+            fetch_size=target.fetch_size,
+            max_retry=target.max_retry,
+            max_pool_size=target.max_pool_size,
+            tree_wait_timeout_in_ms=target.tree_wait_timeout_in_ms,
+            table_wait_timeout_in_ms=target.table_wait_timeout_in_ms,
+            target_fingerprint=target.fingerprint(),
+            policy={str(key): str(value) for key, value in target.policy.items()},
+            last_known_good_credential=dict(target.last_known_good_credential),
+            verified_at=target.verified_at,
+            target_registry=target_registry,
+            session_manager=session_manager,
+        )
+
+    def to_target(self) -> IoTDBTarget:
+        return IoTDBTarget(
+            target_id=self.target_id,
+            display_name=self.display_name,
+            kind=self.target_kind,
+            host=self.host,
+            port=self.port,
+            node_urls=tuple(self.node_urls) or (f"{self.host}:{self.port}",),
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            sql_dialect=self.sql_dialect,
+            timezone=self.timezone,
+            export_path=self.export_path,
+            iotdb_home=self.iotdb_home,
+            use_ssl=self.use_ssl,
+            ca_certs=self.ca_certs,
+            connection_timeout_in_ms=self.connection_timeout_in_ms,
+            enable_redirection=self.enable_redirection,
+            enable_compression=self.enable_compression,
+            fetch_size=self.fetch_size,
+            max_retry=self.max_retry,
+            max_pool_size=self.max_pool_size,
+            tree_wait_timeout_in_ms=self.tree_wait_timeout_in_ms,
+            table_wait_timeout_in_ms=self.table_wait_timeout_in_ms,
+            policy=dict(self.policy),
+            last_known_good_credential=dict(self.last_known_good_credential),
+            verified_at=self.verified_at,
+        )
+
+    def safe_dict(self) -> dict[str, object]:
+        target = self.to_target()
+        safe = target.as_dict(include_secret=False)
+        safe["password"] = "***" if self.password else ""
+        return safe
 
     @staticmethod
     def from_env_arguments() -> "Config":
@@ -69,62 +209,117 @@ class Config:
         """
         parser = argparse.ArgumentParser(description="IoTDB MCP Server")
 
+        parser.add_argument("--target-id", type=str, default=None, help="Named IoTDB target id")
         parser.add_argument(
-            "--host",
+            "--targets-file",
             type=str,
-            help="IoTDB host",
-            default=os.getenv("IOTDB_HOST", "127.0.0.1"),
+            default=None,
+            help="JSON IoTDB target registry file",
         )
+        parser.add_argument("--host", type=str, help="IoTDB host", default=None)
 
         parser.add_argument(
             "--port",
             type=int,
             help="IoTDB MySQL protocol port",
-            default=os.getenv("IOTDB_PORT", 6667),
+            default=None,
         )
 
         parser.add_argument(
             "--user",
             type=str,
             help="IoTDB username",
-            default=os.getenv("IOTDB_USER", "root"),
+            default=None,
         )
 
         parser.add_argument(
             "--password",
             type=str,
             help="IoTDB password",
-            default=os.getenv("IOTDB_PASSWORD", "root"),
+            default=None,
         )
         
         parser.add_argument(
             "--database",
             type=str,
-            help="IoTDB connect database name",
-            default=os.getenv("IOTDB_DATABASE", "test"),
+            help="IoTDB database/session scope. Table dialect uses database name; tree dialect still requires explicit root paths in SQL.",
+            default=None,
         )
 
         parser.add_argument(
             "--sql-dialect",
             type=str,
             help="SQL dialect: tree or table",
-            default=os.getenv("IOTDB_SQL_DIALECT", "table"),
+            default=None,
+        )
+
+        parser.add_argument(
+            "--timezone",
+            type=str,
+            help="IoTDB session timezone",
+            default=None,
         )
         
         parser.add_argument(
             "--export-path",
             type=str,
             help="Path for exporting query results",
-            default=os.getenv("IOTDB_EXPORT_PATH", "/tmp"),
+            default=None,
         )
+        parser.add_argument("--node-urls", type=str, default=None, help="Comma-separated IoTDB node URLs")
+        parser.add_argument("--use-ssl", choices=("true", "false"), default=None)
+        parser.add_argument("--ca-certs", type=str, default=None)
+        parser.add_argument("--connection-timeout-ms", type=int, default=None)
+        parser.add_argument("--enable-redirection", choices=("true", "false"), default=None)
+        parser.add_argument("--enable-compression", choices=("true", "false"), default=None)
+        parser.add_argument("--fetch-size", type=int, default=None)
+        parser.add_argument("--max-retry", type=int, default=None)
+        parser.add_argument("--max-pool-size", type=int, default=None)
+        parser.add_argument("--wait-timeout-ms", type=int, default=None)
 
         args = parser.parse_args()
-        return Config(
-            host=args.host,
-            port=args.port,
-            user=args.user,
-            password=args.password,
-            database=args.database,
-            sql_dialect=args.sql_dialect,
-            export_path=args.export_path,
+        targets_file = args.targets_file or os.getenv("TIMESEEK_IOTDB_TARGETS_FILE", "")
+        targets_json = os.getenv("TIMESEEK_IOTDB_TARGETS_JSON", "")
+        registry = IoTDBTargetRegistry.from_env(
+            targets_file=targets_file or None,
+            targets_json=targets_json or None,
         )
+        if registry.list_targets(include_secret=False):
+            target = registry.resolve(
+                args.target_id or os.getenv("TIMESEEK_IOTDB_TARGET_ID")
+            )
+        else:
+            target = target_from_mapping(
+                {
+                    "target_id": "unverified-template",
+                    "display_name": "Unverified IoTDB template",
+                    "host": args.host or os.getenv("IOTDB_HOST") or "127.0.0.1",
+                    "port": args.port or os.getenv("IOTDB_PORT") or 6667,
+                    "user": args.user or os.getenv("IOTDB_USER") or "root",
+                    "password": args.password
+                    if args.password is not None
+                    else os.getenv("IOTDB_PASSWORD", ""),
+                    "database": args.database or os.getenv("IOTDB_DATABASE") or "test",
+                    "sql_dialect": args.sql_dialect
+                    or os.getenv("IOTDB_SQL_DIALECT")
+                    or "tree",
+                    "timezone": args.timezone or os.getenv("IOTDB_TIMEZONE") or "+00:00",
+                    "export_path": args.export_path or default_export_path(),
+                    "node_urls": args.node_urls,
+                }
+            )
+        from iotdb_mcp_server.session_manager import IoTDBSessionManager
+
+        config = Config.from_target(
+            target,
+            target_registry=registry,
+            session_manager=IoTDBSessionManager(registry),
+        )
+        config.targets_file = targets_file
+        config.targets_json = targets_json
+        if targets_file:
+            try:
+                config.targets_file_mtime_ns = Path(targets_file).expanduser().stat().st_mtime_ns
+            except OSError:
+                config.targets_file_mtime_ns = None
+        return config
