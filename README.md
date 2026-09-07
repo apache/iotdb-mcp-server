@@ -1,7 +1,5 @@
 # IoTDB MCP Server
 
-[![smithery badge](https://smithery.ai/badge/@apache/iotdb-mcp-server)](https://smithery.ai/server/@apache/iotdb-mcp-server)
-
 English | [中文](README-zh.md)
 
 ## Overview
