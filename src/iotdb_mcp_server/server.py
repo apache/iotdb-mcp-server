@@ -63,7 +63,9 @@ db_config = {
 
 max_pool_size = 100  # Increased from 100 for better concurrency
 
-logger.info(f"IoTDB Config: {db_config}")
+# Never print credentials: log a copy of the config with the password masked.
+logged_config = {**db_config, "password": "***"}
+logger.info(f"IoTDB Config: {logged_config}")
 
 # Ensure export directory exists
 if not os.path.exists(config.export_path):

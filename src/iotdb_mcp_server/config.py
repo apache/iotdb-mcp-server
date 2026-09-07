@@ -17,7 +17,7 @@
 #
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 
 
@@ -42,7 +42,7 @@ class Config:
     IoTDB username
     """
 
-    password: str
+    password: str = field(repr=False)
     """
     IoTDB password
     """
