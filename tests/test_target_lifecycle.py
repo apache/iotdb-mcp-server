@@ -168,6 +168,43 @@ class TargetLifecycleTest(unittest.TestCase):
         self.assertFalse(is_iotdb_connection_error(RuntimeError("syntax error")))
         self.assertTrue(is_iotdb_connection_error(RuntimeError("Status code 801")))
 
+    def test_pool_wait_timeout_does_not_count_as_connection_error(self) -> None:
+        self.assertFalse(
+            is_iotdb_connection_error(
+                TimeoutError("Wait to get session timeout in SessionPool")
+            )
+        )
+
+    def test_managed_tree_session_is_returned_to_pool(self) -> None:
+        target = target_from_mapping(
+            {
+                "target_id": "cloud",
+                "host": "192.168.99.15",
+                "port": 6667,
+                "user": "root",
+                "password": "known-good",
+                "sql_dialect": "tree",
+            }
+        )
+        manager = IoTDBSessionManager(
+            IoTDBTargetRegistry({target.target_id: target}, target.target_id)
+        )
+        manager.set_connection_error_callback(Mock())
+        raw_pool = Mock()
+        raw_session = Mock()
+        raw_pool.get_session.return_value = raw_session
+
+        with patch(
+            "iotdb_mcp_server.session_manager.create_tree_session_pool",
+            return_value=raw_pool,
+        ):
+            session = manager.tree_pool(target.target_id).get_session()
+            session.close()
+            session.close()
+
+        raw_pool.put_back.assert_called_once_with(raw_session)
+        raw_session.close.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

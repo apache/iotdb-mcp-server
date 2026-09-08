@@ -35,6 +35,58 @@ class _FakeMcp:
 
 
 class DatabaseTargetRoutingTest(unittest.TestCase):
+    def test_use_database_updates_target_and_rebuilds_its_pool(self) -> None:
+        target = target_from_mapping(
+            {
+                "target_id": "table-cloud",
+                "host": "192.168.99.20",
+                "port": 6667,
+                "user": "root",
+                "password": "known-good",
+                "database": "original_db",
+                "sql_dialect": "table",
+                "verified_at": "2026-07-13T00:00:00+00:00",
+            }
+        )
+        registry = IoTDBTargetRegistry(
+            {target.target_id: target},
+            default_target_id=target.target_id,
+        )
+        manager = IoTDBSessionManager(registry)
+        config = Config.from_target(
+            target,
+            target_registry=registry,
+            session_manager=manager,
+        )
+        pool = Mock()
+        session = Mock()
+        pool.get_session.return_value = session
+        mcp = _FakeMcp()
+        register_database_tools(mcp, config, logging.getLogger(__name__))
+
+        with patch(
+            "iotdb_mcp_server.session_manager.create_table_session_pool",
+            return_value=pool,
+        ):
+            response = asyncio.run(mcp.tools["use_database"]("analytics"))
+
+        session.execute_non_query_statement.assert_called_once_with("USE analytics")
+        session.close.assert_called_once()
+        pool.close.assert_called_once()
+        self.assertEqual(config.database, "analytics")
+        updated_registry = config.target_registry
+        assert updated_registry is not None
+        self.assertEqual(
+            updated_registry.resolve(target.target_id).database,
+            "analytics",
+        )
+        self.assertEqual(
+            manager.registry.resolve(target.target_id).database,
+            "analytics",
+        )
+        payload = json.loads(response[-1].text)
+        self.assertEqual(payload["context"]["iotdb"]["database"], "analytics")
+
     def test_create_database_keeps_explicit_target_through_pool_selection(self) -> None:
         default_target = target_from_mapping(
             {

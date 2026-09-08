@@ -34,11 +34,13 @@ from iotdb_mcp_server.services.json_response import (
     sql_success_response,
 )
 from iotdb_mcp_server.services.target_selection import (
+    apply_target_registry,
     iotdb_target_response_context,
     select_target_config,
     table_session_pool,
     tree_session_pool,
 )
+from iotdb_mcp_server.target_registry import merge_target
 
 _TABLE_DB_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TREE_DB_PATTERN = re.compile(r"^root(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
@@ -301,19 +303,46 @@ def register_database_tools(mcp, config: Config, logger: logging.Logger) -> None
             max_pool_size=max_pool_size,
             tool_name="use_database",
         )
-        with iotdb_target_response_context(selected_config):
+        table_session = None
+        try:
+            database_name = _validate_database_name(
+                selected_config.sql_dialect, database
+            )
+            sql = f"USE {database_name}"
+            table_session = session_pool.get_session()
+            table_session.execute_non_query_statement(sql)
+            table_session.close()
             table_session = None
-            try:
-                database_name = _validate_database_name(
-                    selected_config.sql_dialect, database
+
+            updated_target = merge_target(
+                selected_config.to_target(),
+                {"database": database_name},
+            )
+            registry = config.target_registry or selected_config.target_registry
+            if registry is not None:
+                updated_registry = registry.with_target(updated_target)
+                apply_target_registry(
+                    config,
+                    updated_registry,
+                    active_target_id=config.target_id or updated_target.target_id,
+                    close_pools=False,
                 )
-                sql = f"USE {database_name}"
-                table_session = session_pool.get_session()
-                table_session.execute_non_query_statement(sql)
-                table_session.close()
+                if config.session_manager is not None:
+                    config.session_manager.close_target_pools(updated_target.target_id)
+                updated_config = select_target_config(
+                    config,
+                    target_id=updated_target.target_id,
+                )
+            else:
+                selected_config.database = database_name
+                if config.target_id == selected_config.target_id:
+                    config.database = database_name
+                updated_config = selected_config
+
+            with iotdb_target_response_context(updated_config):
                 return sql_success_response("use_database", sql)
-            except Exception as e:
-                if table_session:
-                    table_session.close()
-                logger.error(f"Failed to use database: {str(e)}")
-                raise
+        except Exception as e:
+            if table_session:
+                table_session.close()
+            logger.error(f"Failed to use database: {str(e)}")
+            raise

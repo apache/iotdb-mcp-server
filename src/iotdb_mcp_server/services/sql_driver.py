@@ -238,6 +238,75 @@ def _normalize_for_prefix(sql: str) -> str:
     return re.sub(r"\s+", " ", sql).strip().upper()
 
 
+def _top_level_sql_keywords(sql: str) -> list[str]:
+    """Return unquoted SQL words outside parentheses and comments."""
+    keywords: list[str] = []
+    token: list[str] = []
+    quote: str | None = None
+    depth = 0
+    index = 0
+
+    def flush_token() -> None:
+        if token:
+            keywords.append("".join(token).upper())
+            token.clear()
+
+    while index < len(sql):
+        char = sql[index]
+        next_char = sql[index + 1] if index + 1 < len(sql) else ""
+
+        if quote is not None:
+            if char == quote:
+                if next_char == quote:
+                    index += 2
+                    continue
+                quote = None
+            elif char == "\\":
+                index += 2
+                continue
+            index += 1
+            continue
+
+        if char in {"'", '"', "`"}:
+            flush_token()
+            quote = char
+            index += 1
+            continue
+        if char == "-" and next_char == "-":
+            flush_token()
+            newline = sql.find("\n", index + 2)
+            index = len(sql) if newline < 0 else newline + 1
+            continue
+        if char == "/" and next_char == "*":
+            flush_token()
+            comment_end = sql.find("*/", index + 2)
+            index = len(sql) if comment_end < 0 else comment_end + 2
+            continue
+        if char == "(":
+            flush_token()
+            depth += 1
+            index += 1
+            continue
+        if char == ")":
+            flush_token()
+            depth = max(0, depth - 1)
+            index += 1
+            continue
+        if depth == 0 and (char.isalnum() or char == "_"):
+            token.append(char)
+        else:
+            flush_token()
+        index += 1
+
+    flush_token()
+    return keywords
+
+
+def _select_writes_results(sql: str) -> bool:
+    keywords = _top_level_sql_keywords(sql)
+    return bool(keywords and keywords[0] == "SELECT" and "INTO" in keywords[1:])
+
+
 def _matches_prefix(normalized_upper: str, prefix: str) -> bool:
     if not normalized_upper.startswith(prefix):
         return False
@@ -280,6 +349,9 @@ def _resolve_whitelists(sql_dialect: str) -> dict[str, tuple[str, ...]]:
 
 def _classify_sql(sql: str, whitelists: dict[str, tuple[str, ...]]) -> tuple[str, str]:
     normalized_upper = _normalize_for_prefix(sql)
+
+    if _select_writes_results(sql):
+        return "full", "SELECT INTO"
 
     for category in ("readonly", "ddl", "full"):
         for prefix in whitelists[category]:

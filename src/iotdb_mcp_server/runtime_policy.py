@@ -30,8 +30,16 @@ from typing import Any
 _DEFAULT_SERVER_NAME = "iotdb"
 _SHELL_DEFAULT_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}$")
 _SENSITIVE_KEY_RE = re.compile(r"(PASSWORD|SECRET|TOKEN|API_KEY|ACCESS_KEY)", re.IGNORECASE)
+_WITHHELD_ENV_KEYS = frozenset({"TIMESEEK_IOTDB_TARGETS_JSON"})
 _SESSION_POLICY_LOCK = RLock()
 _SESSION_POLICY: dict[str, str] = {}
+
+_ENFORCEMENT_POLICY_KEYS = frozenset(
+    {
+        "TIMESEEK_MCP_PERMISSION_ENFORCEMENT",
+        "IOTDB_STRICT_PERMISSION_ENFORCEMENT",
+    }
+)
 
 _POLICY_KEYS = frozenset(
     {
@@ -92,6 +100,9 @@ _FULL_PERMISSION_DEFAULTS = {
     "IOTDB_ENABLE_MODEL_MANAGEMENT": "true",
     "IOTDB_MODEL_ALLOWED_USERS": "*",
     "IOTDB_REQUIRE_MODEL_DESTRUCTIVE_CONFIRM": "true",
+}
+
+_ENFORCEMENT_DEFAULTS = {
     "TIMESEEK_MCP_PERMISSION_ENFORCEMENT": "advisory",
     "IOTDB_STRICT_PERMISSION_ENFORCEMENT": "false",
 }
@@ -205,7 +216,10 @@ def dynamic_getenv(name: str, default: str | None = None) -> str | None:
     if value not in (None, ""):
         return value
 
-    return _FULL_PERMISSION_DEFAULTS.get(name, default)
+    return _FULL_PERMISSION_DEFAULTS.get(
+        name,
+        _ENFORCEMENT_DEFAULTS.get(name, default),
+    )
 
 
 def dynamic_env_bool(name: str, default: bool) -> bool:
@@ -235,7 +249,9 @@ def strict_permission_enforcement() -> bool:
 
 def _redact_env(env: dict[str, str]) -> dict[str, str]:
     return {
-        key: "***" if _SENSITIVE_KEY_RE.search(key) else value
+        key: "***"
+        if key in _WITHHELD_ENV_KEYS or _SENSITIVE_KEY_RE.search(key)
+        else value
         for key, value in env.items()
     }
 
@@ -287,8 +303,18 @@ def set_session_policy(
         updates.update({str(key): _coerce_policy_value(value) for key, value in policy.items()})
 
     with _SESSION_POLICY_LOCK:
+        preserved_enforcement = (
+            {
+                key: value
+                for key, value in _SESSION_POLICY.items()
+                if key in _ENFORCEMENT_POLICY_KEYS
+            }
+            if replace and preset
+            else {}
+        )
         if replace:
             _SESSION_POLICY.clear()
+            _SESSION_POLICY.update(preserved_enforcement)
         _SESSION_POLICY.update(updates)
 
     return dynamic_policy_snapshot()
@@ -320,7 +346,7 @@ def dynamic_policy_snapshot() -> dict[str, Any]:
         "mcp_config_path": path,
         "session_policy": _redact_env(session_policy),
         "mcp_env": _redact_env(env),
-        "defaults": dict(_FULL_PERMISSION_DEFAULTS),
+        "defaults": {**_FULL_PERMISSION_DEFAULTS, **_ENFORCEMENT_DEFAULTS},
         "effective_policy": _redact_env(effective),
         "supported_keys": supported_policy_keys(),
         "presets": sorted(_PRESET_POLICIES),

@@ -308,6 +308,10 @@ class Config:
                     "node_urls": args.node_urls,
                 }
             )
+            registry = registry.with_target(
+                target,
+                default_target_id=target.target_id,
+            )
         from iotdb_mcp_server.session_manager import IoTDBSessionManager
 
         config = Config.from_target(

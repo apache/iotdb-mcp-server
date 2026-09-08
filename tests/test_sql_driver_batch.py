@@ -16,8 +16,10 @@ from iotdb_mcp_server.config import Config  # noqa: E402
 from iotdb_mcp_server.result_store import FileResultStore  # noqa: E402
 from iotdb_mcp_server.result_store import StoredCsvResult  # noqa: E402
 from iotdb_mcp_server.services.sql_driver import (  # noqa: E402
+    _classify_sql,
     _render_sql_template,
     _resolve_batch_sqls,
+    _resolve_whitelists,
     _stored_result_payload,
     register_sql_driver_tools,
 )
@@ -90,6 +92,24 @@ class FakePool:
 
 
 class SqlDriverBatchTest(unittest.TestCase):
+    def test_tree_select_into_requires_full_permission(self) -> None:
+        category, matched_prefix = _classify_sql(
+            "SELECT s1 INTO root.dest.d1(s1) FROM root.source.d1",
+            _resolve_whitelists("tree"),
+        )
+
+        self.assertEqual(category, "full")
+        self.assertEqual(matched_prefix, "SELECT INTO")
+
+    def test_select_literal_containing_into_remains_readonly(self) -> None:
+        category, matched_prefix = _classify_sql(
+            "SELECT 'INTO' AS label FROM root.source.d1",
+            _resolve_whitelists("tree"),
+        )
+
+        self.assertEqual(category, "readonly")
+        self.assertEqual(matched_prefix, "SELECT")
+
     def test_resolve_direct_sqls_normalizes_single_statements(self) -> None:
         statements = _resolve_batch_sqls(
             [" SHOW TIMESERIES root.** LIMIT 1; ", "SELECT s1 FROM root.sg.d1"],

@@ -191,6 +191,8 @@ def is_iotdb_connection_error(error: BaseException) -> bool:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return False
         if isinstance(current, (IoTDBConnectionException, ConnectionError, OSError)):
             return True
         message = str(current).lower()
@@ -209,9 +211,40 @@ def is_iotdb_connection_error(error: BaseException) -> bool:
 
 
 class _ManagedSession:
-    def __init__(self, session: Any, on_connection_error: Callable[[BaseException], None]):
+    def __init__(
+        self,
+        session: Any,
+        on_connection_error: Callable[[BaseException], None],
+        release_session: Callable[[Any], None] | None = None,
+    ):
         self._session = session
         self._on_connection_error = on_connection_error
+        self._release_session = release_session
+        self._broken = False
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+
+        if self._release_session is None:
+            self._session.close()
+            return
+
+        if not self._broken:
+            self._release_session(self._session)
+            return
+
+        try:
+            self._session.close()
+        finally:
+            try:
+                self._release_session(self._session)
+            except ConnectionError:
+                # The connection-error callback may already have closed and
+                # evicted the pool. The broken session itself is closed above.
+                pass
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._session, name)
@@ -223,6 +256,7 @@ class _ManagedSession:
                 return attribute(*args, **kwargs)
             except Exception as exc:
                 if is_iotdb_connection_error(exc):
+                    self._broken = True
                     self._on_connection_error(exc)
                 raise
 
@@ -230,9 +264,15 @@ class _ManagedSession:
 
 
 class _ManagedPool:
-    def __init__(self, pool: Any, on_connection_error: Callable[[BaseException], None]):
+    def __init__(
+        self,
+        pool: Any,
+        on_connection_error: Callable[[BaseException], None],
+        release_session: Callable[[Any], None] | None = None,
+    ):
         self._pool = pool
         self._on_connection_error = on_connection_error
+        self._release_session = release_session
 
     def get_session(self) -> _ManagedSession:
         try:
@@ -241,7 +281,11 @@ class _ManagedPool:
             if is_iotdb_connection_error(exc):
                 self._on_connection_error(exc)
             raise
-        return _ManagedSession(session, self._on_connection_error)
+        return _ManagedSession(
+            session,
+            self._on_connection_error,
+            release_session=self._release_session,
+        )
 
     def close(self) -> None:
         self._pool.close()
@@ -291,6 +335,7 @@ class IoTDBSessionManager:
                 pool = _ManagedPool(
                     pool,
                     lambda error: self._evict_failed_target(target.target_id, error),
+                    release_session=pool.put_back,
                 )
             self._tree_pools[key] = pool
         return self._tree_pools[key]
@@ -343,18 +388,7 @@ class IoTDBSessionManager:
             self.close()
         self.registry = registry
 
-    def set_connection_error_callback(
-        self,
-        callback: Callable[[str, BaseException, IoTDBTargetRegistry], None] | None,
-    ) -> None:
-        self._connection_error_callback = callback
-
-    def _evict_failed_target(self, target_id: str, error: BaseException) -> None:
-        try:
-            updated = self.registry.without_target(target_id)
-        except KeyError:
-            return
-        self.registry = updated
+    def close_target_pools(self, target_id: str) -> None:
         tree_pools = [
             pool for key, pool in self._tree_pools.items() if key[0] == target_id
         ]
@@ -372,5 +406,19 @@ class IoTDBSessionManager:
                 pool.close()
             except Exception:
                 pass
+
+    def set_connection_error_callback(
+        self,
+        callback: Callable[[str, BaseException, IoTDBTargetRegistry], None] | None,
+    ) -> None:
+        self._connection_error_callback = callback
+
+    def _evict_failed_target(self, target_id: str, error: BaseException) -> None:
+        try:
+            updated = self.registry.without_target(target_id)
+        except KeyError:
+            return
+        self.registry = updated
+        self.close_target_pools(target_id)
         if self._connection_error_callback is not None:
             self._connection_error_callback(target_id, error, updated)
