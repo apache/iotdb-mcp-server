@@ -16,9 +16,32 @@ The server doesn't expose any resources.
 
 The server doesn't provide any prompts.
 
+## Permission Model
+
+IoTDB MCP permissions are advisory by default. The server reports the required
+permission, risk level, and confirmation parameter for SQL actions, while the
+host agent system owns user approval. Use `inspect_sql_permission` before
+executing DDL/DML or destructive SQL when the tool is available.
+
+Long-running hosted agents can provide full-permission defaults with
+environment variables such as `IOTDB_SQL_DRIVER_MODE=full` and
+`TIMESEEK_MCP_PERMISSION_ENFORCEMENT=advisory`. Set
+`TIMESEEK_MCP_PERMISSION_ENFORCEMENT=strict` only when the MCP server itself
+should hard-block disallowed operations.
+
 ### Tools
 
 The server offers different tools for IoTDB Tree Model and Table Model. You can choose between them by setting the "IOTDB_SQL_DIALECT" configuration to either "tree" or "table".
+
+Dialect-specific identifier semantics:
+
+- Tree dialect:
+  - `FROM` targets use explicit `root...` paths.
+  - Projection expressions should usually use measurement names instead of full `root...` paths.
+  - `IOTDB_DATABASE` is only a connection/session hint; tree SQL still needs explicit root paths.
+- Table dialect:
+  - `FROM` targets use table names in the current database.
+  - Projection expressions use column names.
 
 #### Tree Model
 
@@ -43,6 +66,28 @@ The server offers different tools for IoTDB Tree Model and Table Model. You can 
   - Supported functions:
     - SUM, COUNT, MAX_VALUE, MIN_VALUE, AVG, VARIANCE, MAX_TIME, MIN_TIME, etc.
   - Returns: Query results as array of objects
+- `sql_executor_batch`
+  - Execute multiple readonly SQL statements in parallel and store each result in ResultStore
+  - Input:
+    - `sqls` (array): Explicit single SQL statements, or
+    - `sql_template` + `param_sets`: Repeated SQL template with parameter objects
+    - `max_concurrency` (integer): Concurrent statement limit, default 4
+    - `worker_pool_size` (integer): Thread worker pool size, default follows concurrency and is capped by `IOTDB_SQL_EXECUTOR_BATCH_MAX_WORKER_POOL_SIZE` (default 16)
+    - `per_item_timeout_ms` (integer): Per-statement wait timeout, default 60000
+    - `batch_timeout_ms` (integer): Whole-batch wait timeout, default 300000
+    - `max_result_rows_per_item` / `max_result_bytes_per_item`: Per-statement result quota, defaults 10000 rows and 16 MiB
+    - `max_batch_result_rows` / `max_batch_result_bytes`: Whole-batch result quota, defaults 100000 rows and 64 MiB
+  - Template placeholders:
+    - `{{name}}` for SQL literals, `{{name:path}}` for IoTDB paths, `{{name:identifier}}` for SQL identifiers
+  - Returns: Batch summary plus per-statement `result_id`, row count, preview rows, and paging metadata
+- `read_result_pages`
+  - Read multiple ResultStore pages in one MCP call
+  - Input:
+    - `pages` (array): Page request objects with `result_id` plus optional `cursor`, `offset`, `limit`, and `owner_session_id`
+    - `default_limit` (integer): Default page size for items without `limit`
+    - `max_pages` / `max_total_rows`: Per-call quotas, defaults 32 pages and 10000 rows
+    - `continue_on_error` (boolean): Return per-item errors instead of aborting, default true
+  - Returns: Batch page summary plus per-page rows, cursors, and errors
 - `export_query`
   - Execute a query and export the results to a CSV or Excel file
   - Input:
@@ -50,6 +95,39 @@ The server offers different tools for IoTDB Tree Model and Table Model. You can 
     - `format` (string): Export format, either "csv" or "excel" (default: "csv")
     - `filename` (string): Optional filename for the exported file. If not provided, a unique filename will be generated.
   - Returns: Information about the exported file and a preview of the data (max 10 rows)
+- `model_inference`
+  - Execute AINode `CALL INFERENCE(...)` SQL and return the result set
+  - Input:
+    - `inference_sql` (string): A single Tree-dialect SQL statement starting with `CALL INFERENCE`
+  - Validates model id, quoted input SELECT SQL, explicit non-wildcard columns,
+    and supported parameters (`generateTime`, `outputLength`) before execution
+  - Permission metadata: model management is reported through the advisory MCP
+    policy layer. In strict mode, `IOTDB_ENABLE_MODEL_MANAGEMENT=true` and
+    `IOTDB_MODEL_ALLOWED_USERS` are enforced.
+- `prepare_model_inference_request`
+  - Build and validate AINode `CALL INFERENCE(...)` SQL from structured fields
+  - Input:
+    - `model_id` (string): Registered AINode model id
+    - `input_sql` (string): Bounded Tree-dialect SELECT query used as model input
+    - `output_length` (int): Forecast output length (default: 96)
+    - `generate_time` (bool): Whether to request a Time column (default: false)
+
+#### UDF Tools
+
+- `list_udf_functions`
+  - Execute `SHOW FUNCTIONS` for the selected IoTDB target.
+- `prepare_udf_query`
+  - Build a read-only UDF `SELECT` from structured inputs.
+  - Tree form: `SELECT UDF(measurement, "k"="v") FROM root.sg.d1 ...`
+  - Table form: `SELECT UDF(column, "k"="v") FROM table ...`
+- `execute_udf_query`
+  - Execute the validated UDF query and return a ResultStore-backed preview.
+- `export_udf_query`
+  - Execute the validated UDF query and export the result set to CSV or Excel.
+
+UDF tools reject semicolons, SQL comments, and DDL/DML keywords in expressions
+and filter clauses. They are intended for read-only UDF calls such as data
+quality, profiling, repair planning, and anomaly scoring.
 
 #### Table Model
 
@@ -93,10 +171,40 @@ IoTDB MCP Server supports the following configuration options, which can be set 
 | --host        | IOTDB_HOST           | 127.0.0.1     | IoTDB host address               |
 | --port        | IOTDB_PORT           | 6667          | IoTDB port                       |
 | --user        | IOTDB_USER           | root          | IoTDB username                   |
-| --password    | IOTDB_PASSWORD       | root          | IoTDB password                   |
-| --database    | IOTDB_DATABASE       | test          | IoTDB database name              |
+| --password    | IOTDB_PASSWORD       | empty         | IoTDB password                   |
+| --database    | IOTDB_DATABASE       | test          | Table dialect: current database name. Tree dialect: optional session/root scope hint; queries still use explicit `root...` paths. |
 | --sql-dialect | IOTDB_SQL_DIALECT    | table         | SQL dialect: tree or table       |
 | --export-path | IOTDB_EXPORT_PATH    | /tmp          | Path for exporting query results |
+
+The target registry contains only connections that have completed a successful
+login. Call `prepare_iotdb_target` with non-secret fields, then pass explicitly
+user-supplied credentials to `connect_iotdb_target` for one authentication
+attempt. If credentials are absent, ask the user; never probe empty or default
+passwords. An explicitly supplied empty password remains valid input.
+
+Successful login atomically publishes the target and records its per-target
+`last_known_good_credential`. Any connection-layer failure consumes the
+candidate or evicts the published target. A retry requires a new candidate and
+`user_confirmed_retry=true` after explicit user instruction. Public target
+responses redact both the active password and last-known-good password.
+
+When `TIMESEEK_IOTDB_TARGETS_FILE` is configured, successful connections are
+persisted by default. The local Java CLI can reuse exactly that target through
+`iotdb-target-cli`:
+
+```bash
+iotdb-target-cli --target-id cloud \
+  --cli /opt/iotdb/sbin/start-cli.sh -- -e "SHOW VERSION"
+```
+
+The wrapper reloads the verified target on every invocation and supplies its
+host, port, dialect, username, and last-known-good password. It does not pass
+`-db` to `start-cli.sh`, because the Java CLI does not support that option;
+select a table database with SQL `USE <database>`. For `import-data.sh` and
+`import-data.bat`, which do support `-db`, a table target's database is injected
+automatically. A verified empty password is represented by omitting `-pw`, and
+command previews redact non-empty passwords. Calling `start-cli.sh` directly
+does not read the target registry.
 
 ## Performance Optimizations
 
@@ -163,7 +271,7 @@ Add the following configuration to Claude Desktop's configuration file:
         "IOTDB_HOST": "127.0.0.1",
         "IOTDB_PORT": "6667",
         "IOTDB_USER": "root",
-        "IOTDB_PASSWORD": "root",
+        "IOTDB_PASSWORD": "",
         "IOTDB_DATABASE": "test",
         "IOTDB_SQL_DIALECT": "table",
         "IOTDB_EXPORT_PATH": "/path/to/export/folder"
