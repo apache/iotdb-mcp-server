@@ -182,6 +182,16 @@ class _SingleEndpointTableSessionPool:
     def get_session(self) -> TableSession:
         return TableSession(None, session_pool=self._session_pool)
 
+    @staticmethod
+    def discard_session(table_session: TableSession) -> None:
+        """Close a borrowed raw Session without returning it to its pool."""
+        raw_session = getattr(table_session, "_TableSession__session", None)
+        if raw_session is None:
+            raise RuntimeError(
+                "Cannot discard TableSession: underlying Session is unavailable."
+            )
+        raw_session.close()
+
     def close(self) -> None:
         self._session_pool.close()
 
@@ -216,10 +226,12 @@ class _ManagedSession:
         session: Any,
         on_connection_error: Callable[[BaseException], None],
         release_session: Callable[[Any], None] | None = None,
+        discard_session: Callable[[Any], None] | None = None,
     ):
         self._session = session
         self._on_connection_error = on_connection_error
         self._release_session = release_session
+        self._discard_session = discard_session
         self._broken = False
         self._closed = False
 
@@ -228,16 +240,18 @@ class _ManagedSession:
             return
         self._closed = True
 
-        if self._release_session is None:
+        if self._broken and self._discard_session is not None:
             try:
-                self._session.close()
-            except ConnectionError:
-                if not self._broken:
-                    raise
-                # TableSession.close() returns its borrowed session through the
-                # underlying pool. A connection-error callback may already have
-                # evicted the target and closed that pool, so this cleanup error
-                # must not replace the original database failure.
+                self._discard_session(self._session)
+            except Exception:
+                # Cleanup must not replace the connection error that marked the
+                # session broken. The discard callback has already attempted to
+                # close the borrowed transport directly.
+                pass
+            return
+
+        if self._release_session is None:
+            self._session.close()
             return
 
         if not self._broken:
@@ -277,10 +291,12 @@ class _ManagedPool:
         pool: Any,
         on_connection_error: Callable[[BaseException], None],
         release_session: Callable[[Any], None] | None = None,
+        discard_session: Callable[[Any], None] | None = None,
     ):
         self._pool = pool
         self._on_connection_error = on_connection_error
         self._release_session = release_session
+        self._discard_session = discard_session
 
     def get_session(self) -> _ManagedSession:
         try:
@@ -293,6 +309,7 @@ class _ManagedPool:
             session,
             self._on_connection_error,
             release_session=self._release_session,
+            discard_session=self._discard_session,
         )
 
     def close(self) -> None:
@@ -377,6 +394,7 @@ class IoTDBSessionManager:
                 pool = _ManagedPool(
                     pool,
                     lambda error: self._evict_failed_target(target.target_id, error),
+                    discard_session=pool.discard_session,
                 )
             self._table_pools[key] = pool
         return self._table_pools[key]
