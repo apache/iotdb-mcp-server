@@ -34,6 +34,11 @@ def env_or_default(name: str, default: str) -> str:
     return value
 
 
+def _argument_or_env(value: Any, name: str) -> Any:
+    """Return an explicit CLI value, otherwise the matching environment value."""
+    return value if value is not None else os.getenv(name)
+
+
 def default_export_path() -> str:
     explicit = os.getenv("IOTDB_EXPORT_PATH")
     if explicit:
@@ -118,7 +123,11 @@ class Config:
     table_wait_timeout_in_ms: int = 10000
     target_fingerprint: str = ""
     policy: dict[str, str] = field(default_factory=dict)
-    last_known_good_credential: dict[str, object] = field(default_factory=dict)
+    last_known_good_credential: dict[str, object] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
     verified_at: str = ""
     target_registry: IoTDBTargetRegistry | None = field(default=None, repr=False, compare=False)
     session_manager: Any | None = field(default=None, repr=False, compare=False)
@@ -288,23 +297,63 @@ class Config:
                 args.target_id or os.getenv("TIMESEEK_IOTDB_TARGET_ID")
             )
         else:
+            wait_timeout = (
+                args.wait_timeout_ms
+                if args.wait_timeout_ms is not None
+                else os.getenv("IOTDB_WAIT_TIMEOUT_MS")
+            )
             target = target_from_mapping(
                 {
                     "target_id": "unverified-template",
                     "display_name": "Unverified IoTDB template",
-                    "host": args.host or os.getenv("IOTDB_HOST") or "127.0.0.1",
-                    "port": args.port or os.getenv("IOTDB_PORT") or 6667,
-                    "user": args.user or os.getenv("IOTDB_USER") or "root",
-                    "password": args.password
-                    if args.password is not None
-                    else os.getenv("IOTDB_PASSWORD", ""),
-                    "database": args.database or os.getenv("IOTDB_DATABASE") or "test",
+                    "host": _argument_or_env(args.host, "IOTDB_HOST"),
+                    "port": _argument_or_env(args.port, "IOTDB_PORT"),
+                    "user": _argument_or_env(args.user, "IOTDB_USER"),
+                    "password": _argument_or_env(args.password, "IOTDB_PASSWORD"),
+                    "database": _argument_or_env(args.database, "IOTDB_DATABASE"),
                     "sql_dialect": args.sql_dialect
                     or os.getenv("IOTDB_SQL_DIALECT")
-                    or "tree",
-                    "timezone": args.timezone or os.getenv("IOTDB_TIMEZONE") or "+00:00",
-                    "export_path": args.export_path or default_export_path(),
-                    "node_urls": args.node_urls,
+                    or "table",
+                    "timezone": _argument_or_env(args.timezone, "IOTDB_TIMEZONE"),
+                    "export_path": (
+                        args.export_path
+                        if args.export_path is not None
+                        else default_export_path()
+                    ),
+                    "node_urls": _argument_or_env(args.node_urls, "IOTDB_NODE_URLS"),
+                    "iotdb_home": os.getenv("TIMESEEK_IOTDB_HOME"),
+                    "use_ssl": _argument_or_env(args.use_ssl, "IOTDB_USE_SSL"),
+                    "ca_certs": _argument_or_env(args.ca_certs, "IOTDB_CA_CERTS"),
+                    "connection_timeout_in_ms": _argument_or_env(
+                        args.connection_timeout_ms,
+                        "IOTDB_CONNECTION_TIMEOUT_MS",
+                    ),
+                    "enable_redirection": _argument_or_env(
+                        args.enable_redirection,
+                        "IOTDB_ENABLE_REDIRECTION",
+                    ),
+                    "enable_compression": _argument_or_env(
+                        args.enable_compression,
+                        "IOTDB_ENABLE_COMPRESSION",
+                    ),
+                    "fetch_size": _argument_or_env(args.fetch_size, "IOTDB_FETCH_SIZE"),
+                    "max_retry": _argument_or_env(args.max_retry, "IOTDB_MAX_RETRY"),
+                    "max_pool_size": _argument_or_env(
+                        args.max_pool_size,
+                        "IOTDB_MAX_POOL_SIZE",
+                    ),
+                    "tree_wait_timeout_in_ms": (
+                        args.wait_timeout_ms
+                        if args.wait_timeout_ms is not None
+                        else os.getenv("IOTDB_TREE_WAIT_TIMEOUT_MS")
+                        or wait_timeout
+                    ),
+                    "table_wait_timeout_in_ms": (
+                        args.wait_timeout_ms
+                        if args.wait_timeout_ms is not None
+                        else os.getenv("IOTDB_TABLE_WAIT_TIMEOUT_MS")
+                        or wait_timeout
+                    ),
                 }
             )
             registry = registry.with_target(
