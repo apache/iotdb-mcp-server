@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from iotdb.table_session import TableSession
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
@@ -204,6 +206,64 @@ class TargetLifecycleTest(unittest.TestCase):
 
         raw_pool.put_back.assert_called_once_with(raw_session)
         raw_session.close.assert_not_called()
+
+    def test_broken_table_session_cleanup_preserves_connection_error(self) -> None:
+        target = target_from_mapping(
+            {
+                "target_id": "table-cloud",
+                "host": "192.168.99.15",
+                "port": 6667,
+                "user": "root",
+                "password": "known-good",
+                "database": "test",
+                "sql_dialect": "table",
+            }
+        )
+        manager = IoTDBSessionManager(
+            IoTDBTargetRegistry({target.target_id: target}, target.target_id)
+        )
+        callback = Mock()
+        manager.set_connection_error_callback(callback)
+
+        pool_closed = False
+        raw_pool = Mock()
+        driver_pool = Mock()
+        driver_session = Mock()
+        database_error = ConnectionError("original database failure")
+        driver_session.execute_query_statement.side_effect = database_error
+        driver_pool.get_session.return_value = driver_session
+        table_session = TableSession(None, session_pool=driver_pool)
+        raw_pool.get_session.return_value = table_session
+
+        def close_pool() -> None:
+            nonlocal pool_closed
+            pool_closed = True
+
+        def put_back_driver_session(_session) -> None:
+            if pool_closed:
+                raise ConnectionError("SessionPool has already been closed")
+
+        raw_pool.close.side_effect = close_pool
+        driver_pool.put_back.side_effect = put_back_driver_session
+
+        with patch(
+            "iotdb_mcp_server.session_manager.create_table_session_pool",
+            return_value=raw_pool,
+        ):
+            session = manager.table_pool(target.target_id).get_session()
+            with self.assertRaisesRegex(ConnectionError, "original database failure"):
+                try:
+                    session.execute_query_statement("SHOW TABLES")
+                finally:
+                    session.close()
+
+        raw_pool.close.assert_called_once()
+        driver_pool.put_back.assert_called_once_with(driver_session)
+        callback.assert_called_once_with(
+            target.target_id,
+            database_error,
+            manager.registry,
+        )
 
 
 if __name__ == "__main__":

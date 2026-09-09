@@ -229,7 +229,15 @@ class _ManagedSession:
         self._closed = True
 
         if self._release_session is None:
-            self._session.close()
+            try:
+                self._session.close()
+            except ConnectionError:
+                if not self._broken:
+                    raise
+                # TableSession.close() returns its borrowed session through the
+                # underlying pool. A connection-error callback may already have
+                # evicted the target and closed that pool, so this cleanup error
+                # must not replace the original database failure.
             return
 
         if not self._broken:
