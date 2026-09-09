@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -36,6 +37,66 @@ class FakeMCP:
 
 
 class FileResultStoreTest(unittest.TestCase):
+    def test_failed_manifest_write_removes_partial_result_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FileResultStore(
+                tmp,
+                ResultStoreSettings(
+                    preview_rows=2,
+                    page_size_rows=2,
+                    max_page_rows=10,
+                    shard_rows=10,
+                    shard_bytes=1024,
+                ),
+            )
+
+            with patch.object(
+                Path,
+                "write_text",
+                side_effect=OSError("disk full"),
+            ), self.assertRaisesRegex(OSError, "disk full"):
+                store.write_csv_result(
+                    tool="select_query",
+                    columns=["Time", "root.sg.d.s0"],
+                    rows=["0,0"],
+                    owner_session_id="ses_manifest_failure",
+                )
+
+            session_dir = Path(tmp) / "sessions" / "ses_manifest_failure"
+            self.assertEqual(list(session_dir.glob("res_*")), [])
+
+    def test_failed_row_iteration_removes_partial_result_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FileResultStore(
+                tmp,
+                ResultStoreSettings(
+                    preview_rows=2,
+                    page_size_rows=2,
+                    max_page_rows=10,
+                    shard_rows=10,
+                    shard_bytes=1024,
+                ),
+            )
+
+            def failing_rows():
+                yield "0,0"
+                raise RuntimeError("row generation failed")
+
+            with self.assertRaisesRegex(RuntimeError, "row generation failed"):
+                store.write_csv_result(
+                    tool="select_query",
+                    columns=["Time", "root.sg.d.s0"],
+                    rows=failing_rows(),
+                    owner_session_id="ses_failure",
+                )
+
+            session_dir = Path(tmp) / "sessions" / "ses_failure"
+            self.assertEqual(list(session_dir.glob("res_*")), [])
+            self.assertEqual(
+                store.list_results("ses_failure", limit=10)["result_count"],
+                0,
+            )
+
     def test_write_and_read_pages_across_shards(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = FileResultStore(

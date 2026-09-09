@@ -36,6 +36,20 @@ class _FakeMcp:
         return register
 
 
+class _WrappingMcp:
+    """Model FastMCP versions whose decorator replaces the function object."""
+
+    def __init__(self) -> None:
+        self.tools: dict[str, Any] = {}
+
+    def tool(self):
+        def register(function):
+            self.tools[function.__name__] = function
+            return object()
+
+        return register
+
+
 class ReadonlyTargetRoutingTest(unittest.TestCase):
     def _exercise_explicit_target(
         self,
@@ -169,6 +183,37 @@ class ReadonlyTargetRoutingTest(unittest.TestCase):
                 tool_args=("SHOW DATABASES",),
                 format_result_patch="iotdb_mcp_server.services.metadata._format_result",
             )
+
+    def test_metadata_convenience_tool_uses_undecorated_implementation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Config(
+                host="127.0.0.1",
+                port=6667,
+                user="root",
+                password="",
+                database="test",
+                sql_dialect="table",
+                timezone="+00:00",
+                export_path=directory,
+            )
+            mcp = _WrappingMcp()
+            pool = Mock()
+            session = Mock()
+            pool.get_session.return_value = session
+            session.execute_query_statement.return_value = Mock()
+            register_metadata_tools(mcp, config, logging.getLogger(__name__))
+
+            with patch(
+                "iotdb_mcp_server.services.metadata.table_session_pool",
+                return_value=(config, pool),
+            ), patch(
+                "iotdb_mcp_server.services.metadata._format_result",
+                return_value=[],
+            ):
+                response = asyncio.run(mcp.tools["list_tables"]())
+
+        self.assertEqual(response, [])
+        session.execute_query_statement.assert_called_once_with("SHOW TABLES")
 
 
 if __name__ == "__main__":

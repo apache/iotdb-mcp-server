@@ -170,8 +170,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
             tool_name=tool_name,
         )
 
-    @mcp.tool()
-    async def metadata_query(
+    async def _metadata_query_impl(
         query_sql: str,
         target_id: str | None = None,
         target: dict[str, object] | None = None,
@@ -245,6 +244,25 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
                 raise
 
     @mcp.tool()
+    async def metadata_query(
+        query_sql: str,
+        target_id: str | None = None,
+        target: dict[str, object] | None = None,
+        owner_session_id: str | None = None,
+        max_inline_rows: int | None = None,
+        page_size_rows: int | None = None,
+    ) -> list[TextContent]:
+        """Execute metadata SQL against the selected IoTDB target."""
+        return await _metadata_query_impl(
+            query_sql,
+            target_id=target_id,
+            target=target,
+            owner_session_id=owner_session_id,
+            max_inline_rows=max_inline_rows,
+            page_size_rows=page_size_rows,
+        )
+
+    @mcp.tool()
     async def list_timeseries(
         path: str = "root.**",
         target_id: str | None = None,
@@ -254,7 +272,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """List timeseries under a tree path pattern."""
         _require_target_dialect("tree", "list_timeseries", target_id, target)
         query_sql = f"SHOW TIMESERIES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -271,7 +289,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """List devices under a tree path pattern."""
         _require_target_dialect("tree", "list_devices", target_id, target)
         query_sql = f"SHOW DEVICES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -288,7 +306,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """List child paths under a tree path."""
         _require_target_dialect("tree", "list_child_paths", target_id, target)
         query_sql = f"SHOW CHILD PATHS {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -305,7 +323,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """List child nodes under a tree path."""
         _require_target_dialect("tree", "list_child_nodes", target_id, target)
         query_sql = f"SHOW CHILD NODES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -322,7 +340,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """Count timeseries under a tree path pattern."""
         _require_target_dialect("tree", "count_timeseries", target_id, target)
         query_sql = f"COUNT TIMESERIES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -339,7 +357,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """Count devices under a tree path pattern."""
         _require_target_dialect("tree", "count_devices", target_id, target)
         query_sql = f"COUNT DEVICES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -356,7 +374,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         """Count nodes under a tree path."""
         _require_target_dialect("tree", "count_nodes", target_id, target)
         query_sql = f"COUNT NODES {_validate_tree_path(path)}"
-        return await metadata_query(
+        return await _metadata_query_impl(
             query_sql,
             target_id=target_id,
             target=target,
@@ -371,7 +389,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
     ) -> list[TextContent]:
         """List all tables in current table-model database."""
         _require_target_dialect("table", "list_tables", target_id, target)
-        return await metadata_query(
+        return await _metadata_query_impl(
             "SHOW TABLES",
             target_id=target_id,
             target=target,
@@ -390,7 +408,7 @@ def register_metadata_tools(mcp, config: Config, logger: logging.Logger) -> None
         _require_target_dialect("table", "describe_table", target_id, target)
         safe_table = _validate_table_identifier(table_name)
         details_suffix = " details" if details else ""
-        return await metadata_query(
+        return await _metadata_query_impl(
             f"DESC {safe_table}{details_suffix}",
             target_id=target_id,
             target=target,

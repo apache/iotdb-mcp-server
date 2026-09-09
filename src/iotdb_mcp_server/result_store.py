@@ -304,7 +304,11 @@ class FileResultStore:
             close_shard()
         except Exception:
             if shard_file is not None:
-                shard_file.close()
+                try:
+                    shard_file.close()
+                except OSError:
+                    pass
+            shutil.rmtree(result_dir, ignore_errors=True)
             raise
 
         manifest = {
@@ -325,10 +329,14 @@ class FileResultStore:
             "shards": shards,
         }
         manifest_path = result_dir / _MANIFEST_NAME
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        try:
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            shutil.rmtree(result_dir, ignore_errors=True)
+            raise
         self.cleanup(owner_session_id=owner)
         return StoredCsvResult(
             result_id=result_id,

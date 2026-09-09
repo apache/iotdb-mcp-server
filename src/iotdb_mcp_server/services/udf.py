@@ -229,8 +229,14 @@ def _prepare_udf_res(
 
     def rows():
         while res.has_next():
-            row = res.next().get_fields()
-            yield ",".join(map(str, row))
+            record = res.next()
+            fields = record.get_fields()
+            if plan["dialect"] == "tree" and columns and columns[0] == "Time":
+                yield str(record.get_timestamp()) + "," + ",".join(
+                    map(str, fields)
+                )
+            else:
+                yield ",".join(map(str, fields))
 
     try:
         return csv_result_payload_response(
