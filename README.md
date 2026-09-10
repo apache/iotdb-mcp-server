@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/apache-iotdb-mcp-server-badge.png)](https://mseep.ai/app/apache-iotdb-mcp-server)
+
 # IoTDB MCP Server
 
 English | [中文](README-zh.md)
