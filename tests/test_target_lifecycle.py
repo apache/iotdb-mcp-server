@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from iotdb_mcp_server.session_manager import IoTDBSessionManager  # noqa: E402
 from iotdb_mcp_server.session_manager import (  # noqa: E402
     create_table_session_pool,
+    create_tree_session_pool,
     is_iotdb_connection_error,
     make_tree_pool_config,
 )
@@ -25,6 +26,13 @@ from iotdb_mcp_server.target_registry import (  # noqa: E402
     IoTDBTargetRegistry,
     target_from_mapping,
 )
+
+
+def _seed_session_pool(pool, *sessions) -> None:
+    queue = getattr(pool, "_SessionPool__queue")
+    for session in sessions:
+        queue.put(session)
+    setattr(pool, "_SessionPool__pool_size", len(sessions))
 
 
 class TargetLifecycleTest(unittest.TestCase):
@@ -206,7 +214,7 @@ class TargetLifecycleTest(unittest.TestCase):
         raw_pool.put_back.assert_called_once_with(raw_session)
         raw_session.close.assert_not_called()
 
-    def test_broken_table_session_cleanup_preserves_connection_error(self) -> None:
+    def test_closed_table_pool_discards_all_borrowed_sessions(self) -> None:
         target = target_from_mapping(
             {
                 "target_id": "table-cloud",
@@ -224,46 +232,98 @@ class TargetLifecycleTest(unittest.TestCase):
         callback = Mock()
         manager.set_connection_error_callback(callback)
 
-        pool_closed = False
-        driver_pool = Mock()
-        driver_session = Mock()
+        driver_session_a = Mock()
+        driver_session_b = Mock()
         database_error = ConnectionError("original database failure")
-        driver_session.execute_query_statement.side_effect = database_error
-        driver_pool.get_session.return_value = driver_session
-
-        def close_pool() -> None:
-            nonlocal pool_closed
-            pool_closed = True
-
-        def put_back_driver_session(_session) -> None:
-            if pool_closed:
-                raise ConnectionError("SessionPool has already been closed")
-
-        driver_pool.close.side_effect = close_pool
-        driver_pool.put_back.side_effect = put_back_driver_session
+        successful_result = object()
+        driver_session_a.execute_query_statement.side_effect = database_error
+        driver_session_b.execute_query_statement.return_value = successful_result
+        table_pool = create_table_session_pool(target, max_pool_size=2)
+        driver_pool = table_pool._session_pool
+        _seed_session_pool(driver_pool, driver_session_a, driver_session_b)
 
         with patch(
-            "iotdb_mcp_server.session_manager.SessionPool",
-            return_value=driver_pool,
+            "iotdb_mcp_server.session_manager.create_table_session_pool",
+            return_value=table_pool,
         ):
-            table_pool = create_table_session_pool(target)
-            with patch(
-                "iotdb_mcp_server.session_manager.create_table_session_pool",
-                return_value=table_pool,
+            pool = manager.table_pool(target.target_id, max_pool_size=2)
+            session_a = pool.get_session()
+            session_b = pool.get_session()
+            self.assertIs(
+                session_b.execute_query_statement("SHOW TABLES"),
+                successful_result,
+            )
+            with self.assertRaisesRegex(
+                ConnectionError,
+                "original database failure",
             ):
-                session = manager.table_pool(target.target_id).get_session()
-                with self.assertRaisesRegex(
-                    ConnectionError,
-                    "original database failure",
-                ):
-                    try:
-                        session.execute_query_statement("SHOW TABLES")
-                    finally:
-                        session.close()
+                try:
+                    session_a.execute_query_statement("SHOW TABLES")
+                finally:
+                    session_a.close()
+            session_b.close()
+            session_b.close()
 
-        driver_pool.close.assert_called_once()
-        driver_pool.put_back.assert_not_called()
-        driver_session.close.assert_called_once()
+        self.assertTrue(getattr(driver_pool, "_SessionPool__closed"))
+        driver_session_a.close.assert_called_once()
+        driver_session_b.close.assert_called_once()
+        callback.assert_called_once_with(
+            target.target_id,
+            database_error,
+            manager.registry,
+        )
+
+    def test_closed_tree_pool_discards_all_borrowed_sessions(self) -> None:
+        target = target_from_mapping(
+            {
+                "target_id": "tree-cloud",
+                "host": "192.168.99.15",
+                "port": 6667,
+                "user": "root",
+                "password": "known-good",
+                "sql_dialect": "tree",
+            }
+        )
+        manager = IoTDBSessionManager(
+            IoTDBTargetRegistry({target.target_id: target}, target.target_id)
+        )
+        callback = Mock()
+        manager.set_connection_error_callback(callback)
+
+        raw_session_a = Mock()
+        raw_session_b = Mock()
+        database_error = ConnectionError("original database failure")
+        successful_result = object()
+        raw_session_a.execute_query_statement.side_effect = database_error
+        raw_session_b.execute_query_statement.return_value = successful_result
+        raw_pool = create_tree_session_pool(target, max_pool_size=2)
+        _seed_session_pool(raw_pool, raw_session_a, raw_session_b)
+
+        with patch(
+            "iotdb_mcp_server.session_manager.create_tree_session_pool",
+            return_value=raw_pool,
+        ):
+            pool = manager.tree_pool(target.target_id, max_pool_size=2)
+            session_a = pool.get_session()
+            session_b = pool.get_session()
+            self.assertIs(
+                session_b.execute_query_statement("SHOW DATABASES"),
+                successful_result,
+            )
+            with self.assertRaisesRegex(
+                ConnectionError,
+                "original database failure",
+            ):
+                try:
+                    session_a.execute_query_statement("SHOW DATABASES")
+                finally:
+                    session_a.close()
+            session_b.close()
+            session_b.close()
+
+        self.assertTrue(getattr(raw_pool, "_SessionPool__closed"))
+        raw_session_a.close.assert_called_once()
+        raw_session_b.close.assert_called_once()
         callback.assert_called_once_with(
             target.target_id,
             database_error,

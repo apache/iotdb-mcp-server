@@ -235,27 +235,39 @@ class _ManagedSession:
         self._broken = False
         self._closed = False
 
+    def _discard(self) -> bool:
+        if self._discard_session is None:
+            return False
+        try:
+            self._discard_session(self._session)
+        except Exception:
+            # Discard is best-effort cleanup. It must not replace either the
+            # database error or a successful result from another pool lease.
+            pass
+        return True
+
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
 
-        if self._broken and self._discard_session is not None:
-            try:
-                self._discard_session(self._session)
-            except Exception:
-                # Cleanup must not replace the connection error that marked the
-                # session broken. The discard callback has already attempted to
-                # close the borrowed transport directly.
-                pass
+        if self._broken and self._discard():
             return
 
         if self._release_session is None:
-            self._session.close()
+            try:
+                self._session.close()
+            except ConnectionError:
+                if not self._discard():
+                    raise
             return
 
         if not self._broken:
-            self._release_session(self._session)
+            try:
+                self._release_session(self._session)
+            except ConnectionError:
+                if not self._discard():
+                    raise
             return
 
         try:
@@ -361,6 +373,7 @@ class IoTDBSessionManager:
                     pool,
                     lambda error: self._evict_failed_target(target.target_id, error),
                     release_session=pool.put_back,
+                    discard_session=lambda session: session.close(),
                 )
             self._tree_pools[key] = pool
         return self._tree_pools[key]
