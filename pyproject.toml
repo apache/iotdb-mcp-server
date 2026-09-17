@@ -34,3 +34,4 @@ dev-dependencies = [
 [project.scripts]
 iotdb-mcp-server = "iotdb_mcp_server:main"
 iotdb-target-cli = "iotdb_mcp_server.target_cli:main"
+iotdb-policy-admin = "iotdb_mcp_server.policy_approval:main"

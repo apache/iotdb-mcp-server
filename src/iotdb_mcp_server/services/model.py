@@ -69,7 +69,7 @@ def _assert_model_permission(
             )
 
         allowed_users = _csv_set(
-            dynamic_getenv("IOTDB_MODEL_ALLOWED_USERS", "root") or "root"
+            dynamic_getenv("IOTDB_MODEL_ALLOWED_USERS", "root") or ""
         )
         if "*" not in allowed_users and config.user not in allowed_users:
             raise PermissionError(

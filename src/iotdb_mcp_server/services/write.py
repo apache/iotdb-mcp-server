@@ -52,7 +52,7 @@ def _assert_write_permission(
                 "Set IOTDB_ENABLE_WRITE_DML=true to enable."
             )
 
-        allowed_users = _csv_set(dynamic_getenv("IOTDB_WRITE_ALLOWED_USERS", "root") or "root")
+        allowed_users = _csv_set(dynamic_getenv("IOTDB_WRITE_ALLOWED_USERS", "root") or "")
         if "*" not in allowed_users and config.user not in allowed_users:
             raise PermissionError(
                 f"Current MCP user '{config.user}' is not allowed by IOTDB_WRITE_ALLOWED_USERS."
