@@ -29,6 +29,15 @@ environment variables such as `IOTDB_SQL_DRIVER_MODE=full` and
 `TIMESEEK_MCP_PERMISSION_ENFORCEMENT=strict` only when the MCP server itself
 should hard-block disallowed operations.
 
+Session policy changes are bounded by a deployment policy frozen at startup
+(process environment > MCP configuration > defaults). Narrowing applies immediately;
+widening within that ceiling requires out-of-band administrator approval by default.
+`IOTDB_SESSION_POLICY_APPROVAL_MODE=allow` explicitly permits in-ceiling widening
+without approval. Neither setting allows tools to change enforcement switches,
+SQL classification prefixes, or the deployment ceiling. Reset and replace follow
+the same rules. See [session policy administration](docs/session-policy-security.md)
+for configuration, approval commands, and the required host isolation.
+
 ### Tools
 
 The server offers different tools for IoTDB Tree Model and Table Model. You can choose between them by setting the "IOTDB_SQL_DIALECT" configuration to either "tree" or "table".

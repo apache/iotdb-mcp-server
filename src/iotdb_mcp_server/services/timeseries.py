@@ -52,7 +52,7 @@ def _assert_timeseries_ddl_permission(
                 "Set IOTDB_ENABLE_TIMESERIES_DDL=true to enable."
             )
 
-        allowed_users = _csv_set(dynamic_getenv("IOTDB_TIMESERIES_DDL_ALLOWED_USERS", "root") or "root")
+        allowed_users = _csv_set(dynamic_getenv("IOTDB_TIMESERIES_DDL_ALLOWED_USERS", "root") or "")
         if "*" not in allowed_users and config.user not in allowed_users:
             raise PermissionError(
                 f"Current MCP user '{config.user}' is not allowed by IOTDB_TIMESERIES_DDL_ALLOWED_USERS."

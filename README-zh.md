@@ -27,6 +27,13 @@ IoTDB MCP 权限默认是提示层。服务器为 SQL 操作返回所需权限�
 只有需要 MCP server 自身硬阻断时，才设置
 `TIMESEEK_MCP_PERMISSION_ENFORCEMENT=strict`。
 
+Session 策略受启动时冻结的部署权限上限约束（进程环境变量 > MCP 配置 > 默认值）。
+收紧权限立即生效；在上限内扩大权限默认需要独立的管理员审批，审批前保持原策略。
+部署者可设置 `IOTDB_SESSION_POLICY_APPROVAL_MODE=allow`，允许上限内免审批调整。
+普通工具不能修改强制检查开关、SQL 分类扩展项或突破部署上限；reset 和 replace
+也遵循相同规则。配置与审批步骤见[Session 权限管理](docs/session-policy-security.md)。
+审批目录和管理员命令必须处于 agent 的文件系统及 shell 权限之外。
+
 ### 工具
 
 服务器为 IoTDB 的树模型（Tree Model）和表模型（Table Model）提供了不同的工具。您可以通过设置 "IOTDB_SQL_DIALECT" 配置为 "tree" 或 "table" 来选择使用哪种模型。

@@ -48,13 +48,18 @@ def register_runtime_policy_tools(mcp, config: Config, logger: logging.Logger) -
         replace: bool = False,
     ) -> list[TextContent]:
         """
-        Set session-scoped IoTDB MCP permissions without restarting the MCP server.
+        Request session permissions bounded by the immutable deployment policy.
 
-        preset accepts: full, ddl, readonly. Explicit policy values override preset values.
+        Narrowing applies immediately. Widening may return approval_required with
+        no changes applied; an administrator must approve out of band before retry.
+        There is no agent-supplied approval flag. Presets (full, ddl, readonly) are
+        intersected with the deployment ceiling. Explicit values cannot exceed it.
+        Enforcement switches and SQL classification prefixes are administrator-only.
         """
         snapshot = set_session_policy(policy=policy, preset=preset, replace=replace)
         logger.info(
-            "Updated IoTDB session policy preset=%s replace=%s keys=%s",
+            "IoTDB session policy status=%s preset=%s replace=%s keys=%s",
+            snapshot["status"],
             preset,
             replace,
             sorted((policy or {}).keys()),
@@ -62,16 +67,22 @@ def register_runtime_policy_tools(mcp, config: Config, logger: logging.Logger) -
         return payload_response(
             "set_iotdb_session_policy",
             snapshot,
-            message="IoTDB session policy updated.",
+            message="IoTDB session policy: " + snapshot["status"] + ".",
         )
 
     @mcp.tool()
-    async def reset_iotdb_session_policy(keys: list[str] | None = None) -> list[TextContent]:
-        """Clear all or selected session-scoped IoTDB MCP permission overrides."""
+    async def reset_iotdb_session_policy(
+        keys: list[str] | None = None,
+    ) -> list[TextContent]:
+        """Reset overrides; any resulting widening requires the same approval as set."""
         snapshot = reset_session_policy(keys=keys)
-        logger.info("Reset IoTDB session policy keys=%s", keys or "*")
+        logger.info(
+            "IoTDB session policy reset status=%s keys=%s",
+            snapshot["status"],
+            keys or "*",
+        )
         return payload_response(
             "reset_iotdb_session_policy",
             snapshot,
-            message="IoTDB session policy reset.",
+            message="IoTDB session policy reset: " + snapshot["status"] + ".",
         )

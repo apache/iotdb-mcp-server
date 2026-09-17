@@ -21,6 +21,7 @@ import logging
 from fastmcp import FastMCP
 
 from iotdb_mcp_server.config import Config
+from iotdb_mcp_server.runtime_policy import initialize_runtime_policy
 from iotdb_mcp_server.services.database import register_database_tools
 from iotdb_mcp_server.services.explain import register_explain_tools
 from iotdb_mcp_server.services.metadata import register_metadata_tools
@@ -44,6 +45,7 @@ logging.basicConfig(
 logger = logging.getLogger("iotdb_mcp_server")
 
 config = Config.from_env_arguments()
+initialize_runtime_policy()
 
 logger.info(
     "IoTDB Config: %s",

@@ -59,7 +59,7 @@ def _assert_metadata_permission(config: Config) -> None:
             )
 
         allowed_users = _csv_set(
-            dynamic_getenv("IOTDB_METADATA_ALLOWED_USERS", "*") or "*"
+            dynamic_getenv("IOTDB_METADATA_ALLOWED_USERS", "*") or ""
         )
         if "*" not in allowed_users and config.user not in allowed_users:
             raise PermissionError(

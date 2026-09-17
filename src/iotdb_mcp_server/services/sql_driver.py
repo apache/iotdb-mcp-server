@@ -527,7 +527,8 @@ def _sql_permission_payload(
                 "Call sql_execute with confirm_destructive=true when the "
                 "confirmation_parameter is confirm_destructive."
             ),
-            "do_not_use_environment_as_primary_gate": True,
+            "deployment_policy_is_immutable": True,
+            "strict_policy_cannot_be_bypassed_by_confirmation": True,
         },
     }
 
@@ -547,7 +548,7 @@ def _assert_sql_driver_permission(
             )
 
         allowed_users = _csv_set(
-            dynamic_getenv("IOTDB_SQL_DRIVER_ALLOWED_USERS", "root") or "root"
+            dynamic_getenv("IOTDB_SQL_DRIVER_ALLOWED_USERS", "root") or ""
         )
         if "*" not in allowed_users and config.user not in allowed_users:
             raise PermissionError(

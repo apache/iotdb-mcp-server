@@ -107,11 +107,15 @@ Features:
   - `ddl`: advisory signal for read and DDL-capable workflows
   - `readonly`: advisory signal for read-only workflows
   - In `strict` mode only, these presets become hard execution gates
-- Effective policy priority:
-  - session overlay set by MCP tool
-  - dynamically read `.mcp.json`
-  - process environment
-  - built-in full-permission defaults
+- Deployment ceiling is frozen at server startup: process environment, then
+  `.mcp.json`, then defaults. Policy files are not hot-reloaded.
+- Every session value must be no broader than that ceiling. Presets are intersected
+  with it; explicit above-ceiling requests are rejected atomically.
+- Narrowing applies immediately. Widening (including reset/replace) requires
+  out-of-band approval by default. The operator may explicitly configure
+  `IOTDB_SESSION_POLICY_APPROVAL_MODE=allow` for in-ceiling changes only.
+- Enforcement switches and SQL classification extensions are administrator-only.
+- See [session policy administration](../../../docs/session-policy-security.md).
 
 ### `metadata.py`
 
@@ -284,18 +288,18 @@ Parser check:
 
 ## Security and Permission Model
 
-IoTDB MCP permissions default to host-agent approval flow. The MCP server reports
-required permission and risk; Codex, Claude Code, or OpenCode owns user approval
-through its normal question/approval mechanism. This keeps MCP policy aligned
-with the host agent system instead of turning `.mcp.json` into a hard blocker.
+SQL execution permissions remain advisory by default. The MCP server reports
+required permission and risk, but a tool-supplied confirmation boolean does not
+prove human approval. For a service-enforced SQL permission boundary, enable strict
+mode. Session policy mutation authorization is enforced in both modes.
 
 Default mode is `advisory`. In advisory mode:
 
 - `IOTDB_SQL_DRIVER_MODE` is a prompt-layer signal, not an execution blocker.
 - `IOTDB_ENABLE_*` and `*_ALLOWED_USERS` are prompt-layer/session settings, not
   hard gates.
-- Destructive operations still require explicit tool confirmation flags, such
-  as `confirm_destructive=true`, after the host agent has obtained approval.
+- Destructive operations still require tool confirmation flags, such as
+  `confirm_destructive=true`. These are caller assertions, not verified approvals.
 
 Strict hard gating is available only when explicitly enabled:
 
@@ -305,7 +309,7 @@ TIMESEEK_MCP_PERMISSION_ENFORCEMENT=strict
 IOTDB_STRICT_PERMISSION_ENFORCEMENT=true
 ```
 
-Policy can be changed at runtime without restarting the MCP server:
+Session policy can be narrowed at runtime without restarting the MCP server:
 
 ```json
 {
@@ -314,7 +318,7 @@ Policy can be changed at runtime without restarting the MCP server:
 }
 ```
 
-or:
+Widening within the startup deployment ceiling can be requested with:
 
 ```json
 {
@@ -324,6 +328,14 @@ or:
   }
 }
 ```
+
+The second example may return `applied=false` with `status=approval_required`,
+`approval_rejected`, or `approval_unavailable`. It must not be treated as an applied
+change. An administrator reviews and decides the exact request through
+`iotdb-policy-admin`, outside the agent's authority, then the client retries.
+Changing the deployment ceiling, either enforcement switch, or SQL classification
+prefixes requires administrator-controlled configuration and a server restart.
+See [the complete workflow](../../../docs/session-policy-security.md).
 
 ### Per-module advisory keys
 
