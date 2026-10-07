@@ -234,7 +234,7 @@ def register_query_tools(mcp, config: Config, logger: logging.Logger) -> None:
     async def export_query(
         query_sql: str,
         format: str = "csv",
-        filename: str = None,
+        filename: str | None = None,
         target_id: str | None = None,
         target: dict[str, object] | None = None,
     ) -> list[TextContent]:
@@ -364,7 +364,7 @@ def register_query_tools(mcp, config: Config, logger: logging.Logger) -> None:
     async def export_table_query(
         query_sql: str,
         format: str = "csv",
-        filename: str = None,
+        filename: str | None = None,
         target_id: str | None = None,
         target: dict[str, object] | None = None,
     ) -> list[TextContent]:
