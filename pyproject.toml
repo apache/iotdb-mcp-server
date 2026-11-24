@@ -1,7 +1,7 @@
 [project]
 name = "iotdb-mcp-server"
 packages = [{ include = "src/iotdb_mcp_server" }]
-version = "0.2.0"
+version = "0.3.0"
 description = "A Model Context Protocol (MCP) server that enables secure interaction with IoTDB databases. This server allows AI assistants to list tables, read data, and execute SQL queries through a controlled interface, making database exploration and analysis safer and more structured."
 readme = "README.md"
 license = "Apache-2.0"
